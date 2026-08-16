@@ -1,0 +1,94 @@
+.app-shell {
+  display: grid;
+  height: 100%;
+  min-width: 0;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.app-header {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  background: var(--surface);
+}
+
+.topbar {
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  gap: 22px;
+  padding: 0 28px;
+}
+
+.brand-block {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 5px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.view-navigation {
+  min-width: 0;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.primary-nav {
+  display: flex;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.primary-nav__item {
+  min-height: 42px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.primary-nav__item:hover {
+  color: var(--accent);
+}
+
+.primary-nav__item--active {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.app-content {
+  min-width: 0;
+  overflow: auto;
+  padding: 26px 28px 32px;
+}
+
+.app-footer {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 28px;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 10px;
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Permissions for the WorkBuddy助手 main window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://github.com/deloz/workbuddy-assistant" },
+        { "url": "https://github.com/deloz/workbuddy-assistant/releases/latest" }
+      ]
+    }
+  ]
+}
