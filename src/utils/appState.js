@@ -30,7 +30,7 @@ export function resolveSelectedAccountId(snapshot, selectedAccountId) {
 
 export function formatUpdateMessage({ checking, error, result }) {
   if (checking) {
-    return "正在检查 GitHub Releases…";
+    return "";
   }
   if (error) {
     return error;

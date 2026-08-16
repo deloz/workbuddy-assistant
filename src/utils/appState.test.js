@@ -10,7 +10,7 @@ import {
 } from "./appState.js";
 
 test("formats every update state without creating a separate row", () => {
-  assert.equal(formatUpdateMessage({ checking: true }), "正在检查 GitHub Releases…");
+  assert.equal(formatUpdateMessage({ checking: true }), "");
   assert.equal(formatUpdateMessage({ error: "网络错误" }), "网络错误");
   assert.equal(
     formatUpdateMessage({ result: { status: "updateAvailable", latestVersion: "0.0.2" } }),

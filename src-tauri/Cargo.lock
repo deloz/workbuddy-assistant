@@ -2836,6 +2836,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]
@@ -5249,9 +5250,10 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "workbuddy-assistant"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "chrono",
+ "quick-xml",
  "reqwest 0.12.28",
  "rust_decimal",
  "semver",
