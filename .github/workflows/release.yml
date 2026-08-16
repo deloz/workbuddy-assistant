@@ -1,0 +1,128 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      CARGO_TERM_COLOR: always
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify release version
+        run: npm run verify:version -- "$env:RELEASE_TAG"
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build Tauri application
+        uses: tauri-apps/tauri-action@v1
+        with:
+          args: --verbose --bundles nsis
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $assetDirectory = "release-assets"
+          New-Item -ItemType Directory -Path $assetDirectory -Force | Out-Null
+
+          $portable = "src-tauri/target/release/workbuddy-assistant.exe"
+          if (-not (Test-Path -LiteralPath $portable)) {
+            throw "Portable executable was not generated: $portable"
+          }
+          Copy-Item -LiteralPath $portable -Destination "$assetDirectory/workbuddy-assistant.exe"
+
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not generated"
+          }
+          Copy-Item -LiteralPath $installer.FullName -Destination $assetDirectory
+
+          $checksums = Get-ChildItem $assetDirectory -Filter "*.exe" |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            }
+          $checksums | Set-Content "$assetDirectory/SHA256SUMS.txt" -Encoding utf8NoBOM
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: WorkBuddy助手 ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release-assets/*
+
+      - name: Notify Scoop bucket
+        shell: pwsh
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SCOOP_BUCKET_TOKEN)) {
+            throw "SCOOP_BUCKET_TOKEN is not configured"
+          }
+
+          $headers = @{
+            Authorization = "Bearer $env:SCOOP_BUCKET_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $body = @{
+            event_type = "workbuddy_assistant_release"
+            client_payload = @{ tag = $env:RELEASE_TAG }
+          } | ConvertTo-Json -Depth 4
+
+          Invoke-RestMethod `
+            -Method Post `
+            -Uri "https://api.github.com/repos/deloz/scoop-workbuddy-assistant/dispatches" `
+            -Headers $headers `
+            -Body $body `
+            -ContentType "application/json"
