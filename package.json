@@ -1,13 +1,14 @@
 {
   "name": "workbuddy-assistant",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test",
+    "release:notes": "node scripts/release-notes.mjs",
     "verify:version": "node scripts/verify-version.mjs",
     "tauri": "tauri"
   },

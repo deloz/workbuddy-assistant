@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -91,15 +93,20 @@ jobs:
             }
           $checksums | Set-Content "$assetDirectory/SHA256SUMS.txt" -Encoding utf8NoBOM
 
+      - name: Generate release notes
+        run: npm run release:notes -- --tag "$env:RELEASE_TAG" --output release-assets/RELEASE_NOTES.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: WorkBuddy助手 ${{ github.ref_name }}
+          body_path: release-assets/RELEASE_NOTES.md
           draft: false
           prerelease: false
-          generate_release_notes: true
           fail_on_unmatched_files: true
-          files: release-assets/*
+          files: |
+            release-assets/*.exe
+            release-assets/SHA256SUMS.txt
 
       - name: Notify Scoop bucket
         shell: pwsh

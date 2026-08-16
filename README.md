@@ -65,7 +65,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm.cmd run tauri -- build
 ```
 
-推送符合 `vX.Y.Z` 格式且与项目版本一致的标签后，GitHub Actions 会自动创建正式 Release 并通知 Scoop bucket。
+推送符合 `vX.Y.Z` 格式且与项目版本一致的标签后，GitHub Actions 会根据 Conventional Commits 自动生成分类版本说明、构建附件、创建正式 Release，并通知 Scoop bucket。
 
 ## License
 
