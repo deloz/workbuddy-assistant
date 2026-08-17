@@ -50,6 +50,18 @@ export function formatUpdateMessage({ checking, error, result }) {
   return "尚未发布公开版本";
 }
 
+export function isActionableUpdate(result) {
+  return (
+    result?.status === "updateAvailable" &&
+    typeof result.currentVersion === "string" &&
+    result.currentVersion.trim().length > 0 &&
+    typeof result.latestVersion === "string" &&
+    result.latestVersion.trim().length > 0 &&
+    typeof result.releaseUrl === "string" &&
+    result.releaseUrl.trim().length > 0
+  );
+}
+
 export function getUpdateMessageTone({ error, result }) {
   if (error) {
     return "error";

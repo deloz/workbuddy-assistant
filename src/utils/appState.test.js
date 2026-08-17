@@ -5,6 +5,7 @@ import {
   createEmptyDashboardSnapshot,
   formatUpdateMessage,
   getUpdateMessageTone,
+  isActionableUpdate,
   normalizeError,
   resolveSelectedAccountId,
 } from "./appState.js";
@@ -42,4 +43,19 @@ test("normalizes errors and update message tones", () => {
   assert.equal(getUpdateMessageTone({ error: "失败" }), "error");
   assert.equal(getUpdateMessageTone({ result: { status: "updateAvailable" } }), "available");
   assert.equal(getUpdateMessageTone({ result: { status: "upToDate" } }), "neutral");
+});
+
+test("only exposes complete update results as actionable", () => {
+  const update = {
+    status: "updateAvailable",
+    currentVersion: "0.0.3",
+    latestVersion: "0.0.4",
+    releaseUrl: "https://github.com/deloz/workbuddy-assistant/releases/latest",
+  };
+
+  assert.equal(isActionableUpdate(update), true);
+  assert.equal(isActionableUpdate({ ...update, releaseUrl: null }), false);
+  assert.equal(isActionableUpdate({ ...update, latestVersion: "" }), false);
+  assert.equal(isActionableUpdate({ ...update, status: "upToDate" }), false);
+  assert.equal(isActionableUpdate(null), false);
 });

@@ -94,6 +94,8 @@
     <footer class="app-footer">
       <span>关闭窗口后继续在系统托盘运行</span>
     </footer>
+
+    <UpdateNotice />
   </div>
 </template>
 
@@ -102,11 +104,14 @@ import { onMounted } from "vue";
 
 import CheckinView from "./components/checkin/CheckinView.vue";
 import AccountSwitcher from "./components/common/AccountSwitcher.vue";
+import UpdateNotice from "./components/common/UpdateNotice.vue";
 import CreditView from "./components/credit/CreditView.vue";
 import SettingsPage from "./components/pages/SettingsPage.vue";
 import { useDashboardStore } from "./stores/dashboard";
+import { useSettingsStore } from "./stores/settings";
 
 const store = useDashboardStore();
+const settingsStore = useSettingsStore();
 const navigation = [
   { id: "credit", label: "额度概览" },
   { id: "checkin", label: "签到状态" },
@@ -119,7 +124,13 @@ function focusNavigation(currentId, direction, event) {
   event.currentTarget.parentElement.querySelector(`[data-view-id="${next.id}"]`)?.focus();
 }
 
+async function initializeUpdateCheck() {
+  await settingsStore.initialize();
+  await settingsStore.checkForUpdates();
+}
+
 onMounted(() => {
-  store.initialize();
+  void store.initialize();
+  void initializeUpdateCheck();
 });
 </script>

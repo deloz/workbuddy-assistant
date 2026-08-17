@@ -14,6 +14,8 @@
   --rule-strong: #bcc6ce;
   --accent: #245b84;
   --accent-hover: #184666;
+  --accent-subtle: #eef4f8;
+  --accent-subtle-hover: #e5eef4;
   --danger: #934141;
   --success: #346b49;
 }

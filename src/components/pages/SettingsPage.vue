@@ -33,12 +33,12 @@
               {{ updateMessage }}
             </p>
             <button
-              v-if="store.updateResult?.status === 'updateAvailable'"
+              v-if="store.actionableUpdate"
               class="button button--primary"
               type="button"
-              @click="openLatestRelease"
+              @click="store.openUpdateGuide"
             >
-              前往下载
+              查看更新指导
             </button>
           </dd>
         </div>
@@ -97,13 +97,6 @@ const updateMessageTone = computed(() =>
     result: store.updateResult,
   }),
 );
-
-function openLatestRelease() {
-  const releaseUrl = store.updateResult?.releaseUrl;
-  if (releaseUrl) {
-    store.openExternalLink(releaseUrl);
-  }
-}
 
 onMounted(() => {
   store.initialize();

@@ -1,10 +1,10 @@
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { normalizeError } from "../utils/appState";
+import { isActionableUpdate, normalizeError } from "../utils/appState";
 
 export const EXTERNAL_LINKS = Object.freeze({
   repository: "https://github.com/deloz/workbuddy-assistant",
@@ -21,6 +21,13 @@ export const useSettingsStore = defineStore("settings", () => {
   const updateError = ref(null);
   const updateResult = ref(null);
   const linkError = ref(null);
+  const updateGuideOpen = ref(false);
+  const updateNoticeDismissed = ref(false);
+
+  const actionableUpdate = computed(() => isActionableUpdate(updateResult.value));
+  const updateNoticeVisible = computed(
+    () => actionableUpdate.value && !updateNoticeDismissed.value && !updateGuideOpen.value,
+  );
 
   async function initialize() {
     if (initialized.value) {
@@ -48,8 +55,10 @@ export const useSettingsStore = defineStore("settings", () => {
     checking.value = true;
     updateError.value = null;
     updateResult.value = null;
+    updateGuideOpen.value = false;
     try {
       updateResult.value = await invoke("check_for_updates");
+      updateNoticeDismissed.value = !isActionableUpdate(updateResult.value);
       return true;
     } catch (reason) {
       updateError.value = normalizeError(reason);
@@ -74,6 +83,21 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  function openUpdateGuide() {
+    if (!actionableUpdate.value) {
+      return false;
+    }
+    linkError.value = null;
+    updateNoticeDismissed.value = false;
+    updateGuideOpen.value = true;
+    return true;
+  }
+
+  function dismissUpdate() {
+    updateGuideOpen.value = false;
+    updateNoticeDismissed.value = true;
+  }
+
   return {
     initialized,
     loading,
@@ -81,9 +105,14 @@ export const useSettingsStore = defineStore("settings", () => {
     updateError,
     updateResult,
     linkError,
+    actionableUpdate,
+    updateGuideOpen,
+    updateNoticeVisible,
     version,
     initialize,
     checkForUpdates,
     openExternalLink,
+    openUpdateGuide,
+    dismissUpdate,
   };
 });

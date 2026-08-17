@@ -1,6 +1,6 @@
 [package]
 name = "workbuddy-assistant"
-version = "0.0.3"
+version = "0.0.4"
 description = "WorkBuddy multi-account credit and daily check-in assistant"
 edition = "2024"
 rust-version = "1.95"
