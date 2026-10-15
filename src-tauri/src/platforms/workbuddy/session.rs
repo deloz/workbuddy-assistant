@@ -4,10 +4,12 @@ use reqwest::header::{AUTHORIZATION, HeaderValue};
 use reqwest::{Client, Request, RequestBuilder, StatusCode, Url};
 use serde::Deserialize;
 
-use super::auth::{AccountDescriptor, AuthBundle, AuthCredentials};
+use super::auth::{AccountCredential, AccountDescriptor, AuthBundle};
 
-const API_BASE_URL: &str = "https://copilot.tencent.com";
+pub(crate) const API_BASE_URL: &str = "https://copilot.tencent.com";
 const REQUEST_TIMEOUT_SECONDS: u64 = 15;
+/// 该账号没有可用凭据（已过期且续期失败）时的提示。
+const EXPIRED_SIGNIN_MESSAGE: &str = "该账号的登录已过期，请在设置中重新登录";
 
 pub(crate) struct AccountSession {
     uid: String,
@@ -65,14 +67,14 @@ pub(crate) async fn session_for_account(
     bundle: &AuthBundle,
     target: &AccountDescriptor,
 ) -> Result<AccountSession, String> {
-    let current = bundle
-        .current_account()
-        .ok_or_else(|| "WorkBuddy 登录信息缺少当前账号".to_owned())?;
-    if current.same_identity(target) {
-        return Ok(current_session(&bundle.credentials, target));
+    let credentials = bundle
+        .credential_for(&target.uid)
+        .ok_or_else(|| EXPIRED_SIGNIN_MESSAGE.to_owned())?;
+    if credentials.enterprise_id == target.enterprise_id {
+        return Ok(current_session(credentials, target));
     }
 
-    let request = build_switch_request(client, API_BASE_URL, &bundle.credentials, current, target)?;
+    let request = build_switch_request(client, API_BASE_URL, credentials, target)?;
     let response = client.execute(request).await.map_err(|error| {
         if error.is_timeout() {
             "切换账号超时，请检查网络后重试".to_owned()
@@ -83,11 +85,10 @@ pub(crate) async fn session_for_account(
 
     let status = response.status();
     let envelope = response.json::<SwitchEnvelope>().await.ok();
-    if status == StatusCode::UNAUTHORIZED {
-        return Err("账号服务拒绝当前登录凭据，请在 WorkBuddy 重新登录".to_owned());
-    }
-    if status == StatusCode::FORBIDDEN {
-        return Err("当前登录无法切换到该账号".to_owned());
+    // 浏览器登录拿到的令牌不一定被切换接口接受；插件本身也是“同一令牌 + 企业头”。
+    // 被拒绝时按插件的方式直接带上该身份的企业头，而不是报错。
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        return Ok(current_session(credentials, target));
     }
     if !status.is_success() {
         if let Some(code) = envelope.as_ref().and_then(|body| body.code) {
@@ -112,14 +113,12 @@ pub(crate) async fn session_for_account(
     Ok(AccountSession {
         uid: target.uid.clone(),
         access_token: temporary.access_token,
-        domain: temporary
-            .domain
-            .or_else(|| bundle.credentials.domain.clone()),
+        domain: temporary.domain.or_else(|| credentials.domain.clone()),
         enterprise_id: target.enterprise_id.clone(),
     })
 }
 
-fn current_session(credentials: &AuthCredentials, account: &AccountDescriptor) -> AccountSession {
+fn current_session(credentials: &AccountCredential, account: &AccountDescriptor) -> AccountSession {
     AccountSession {
         uid: credentials.uid.clone(),
         access_token: credentials.access_token.clone(),
@@ -131,8 +130,7 @@ fn current_session(credentials: &AuthCredentials, account: &AccountDescriptor) -
 fn build_switch_request(
     client: &Client,
     base_url: &str,
-    current: &AuthCredentials,
-    current_account: &AccountDescriptor,
+    current: &AccountCredential,
     target: &AccountDescriptor,
 ) -> Result<Request, String> {
     if current.refresh_token.trim().is_empty() {
@@ -158,7 +156,7 @@ fn build_switch_request(
     if let Some(enterprise_id) = target
         .enterprise_id
         .as_ref()
-        .or(current_account.enterprise_id.as_ref())
+        .or(current.enterprise_id.as_ref())
     {
         request = request
             .header("X-Enterprise-Id", enterprise_id)
@@ -192,50 +190,71 @@ fn switch_endpoint(base_url: &str, target: &AccountDescriptor) -> Result<Url, St
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::super::auth;
     use super::*;
+    use crate::data::workbuddy_signin::{StoredIdentity, StoredSignin};
 
-    fn fixture_path(name: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be valid")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "workbuddy-assistant-session-{}-{nonce}-{name}",
-            std::process::id()
-        ))
+    const FAR_FUTURE_MS: i64 = 4_102_444_800_000;
+
+    fn signin(uid: &str, nickname: &str, added_at_ms: i64) -> StoredSignin {
+        StoredSignin {
+            uid: uid.to_owned(),
+            nickname: nickname.to_owned(),
+            account_type: "personal".to_owned(),
+            enterprise_id: None,
+            domain: Some("example.invalid".to_owned()),
+            token_type: Some("Bearer".to_owned()),
+            access_token: "source-access-secret".to_owned(),
+            refresh_token: "source-refresh-secret".to_owned(),
+            expires_at_ms: Some(FAR_FUTURE_MS),
+            refresh_expires_at_ms: None,
+            added_at_ms,
+            identities: Vec::new(),
+        }
     }
 
-    fn fixture_bundle() -> (PathBuf, AuthBundle) {
-        let path = fixture_path("accounts.info");
-        let fixture = r#"{
-            "account":{"uid":"current-user","nickname":"当前账号","type":"personal"},
-            "auth":{"accessToken":"source-access-secret","refreshToken":"source-refresh-secret","domain":"example.invalid","expiresAt":4102444800000},
-            "accounts":[
-                {"uid":"current-user","nickname":"当前账号","type":"personal","pluginEnabled":true},
-                {"uid":"enterprise-user","nickname":"企业账号","type":"ultimate","enterpriseId":"enterprise-42","pluginEnabled":true}
-            ]
-        }"#;
-        fs::write(&path, fixture).expect("fixture should be writable");
-        let bundle = auth::read_auth_bundle_from(&path).expect("fixture should parse");
-        (path, bundle)
+    fn enterprise_identity(enterprise_id: &str, nickname: &str) -> StoredIdentity {
+        StoredIdentity {
+            account_type: "enterprise".to_owned(),
+            enterprise_id: Some(enterprise_id.to_owned()),
+            nickname: Some(nickname.to_owned()),
+            plugin_enabled: Some(true),
+        }
+    }
+
+    fn fixture_bundle() -> AuthBundle {
+        let mut stored = signin("current-user", "当前账号", 10);
+        stored.identities = vec![enterprise_identity("enterprise-42", "企业账号")];
+        auth::build_bundle(&[stored]).expect("bundle should build")
+    }
+
+    fn enterprise_account(bundle: &AuthBundle) -> &AccountDescriptor {
+        bundle
+            .accounts
+            .iter()
+            .find(|account| !account.is_personal())
+            .expect("enterprise account should exist")
+    }
+
+    fn current_account(bundle: &AuthBundle) -> &AccountDescriptor {
+        bundle
+            .accounts
+            .iter()
+            .find(|account| account.is_current)
+            .expect("current account should exist")
     }
 
     #[test]
     fn builds_personal_switch_url_without_enterprise_headers() {
-        let (path, bundle) = fixture_bundle();
-        let current = bundle
-            .current_account()
-            .expect("current account should exist");
+        let bundle = fixture_bundle();
+        let current = current_account(&bundle);
+        let credentials = bundle
+            .credential_for(&current.uid)
+            .expect("credentials should exist");
         let request = build_switch_request(
             &Client::new(),
             "https://example.invalid",
-            &bundle.credentials,
-            current,
+            credentials,
             current,
         )
         .expect("request should build");
@@ -260,25 +279,19 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("source-refresh-secret")
         );
-
-        fs::remove_file(path).expect("fixture should be removable");
     }
 
     #[test]
     fn builds_enterprise_switch_url_and_required_headers() {
-        let (path, bundle) = fixture_bundle();
-        let enterprise = bundle
-            .accounts
-            .iter()
-            .find(|account| !account.is_personal())
-            .expect("enterprise account should exist");
+        let bundle = fixture_bundle();
+        let enterprise = enterprise_account(&bundle);
+        let credentials = bundle
+            .credential_for(&enterprise.uid)
+            .expect("credentials should exist");
         let request = build_switch_request(
             &Client::new(),
             "https://example.invalid/base/",
-            &bundle.credentials,
-            bundle
-                .current_account()
-                .expect("current account should exist"),
+            credentials,
             enterprise,
         )
         .expect("request should build");
@@ -303,41 +316,39 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("Bearer source-access-secret")
         );
-
-        fs::remove_file(path).expect("fixture should be removable");
     }
 
     #[test]
     fn switching_from_enterprise_to_personal_keeps_current_context_headers() {
-        let path = fixture_path("enterprise-current.info");
-        let fixture = r#"{
-            "account":{"uid":"shared-user","nickname":"企业当前","type":"ultimate","oneidAccountId":"enterprise-one"},
-            "auth":{"accessToken":"source-access","refreshToken":"source-refresh","expiresAt":4102444800000},
-            "accounts":[
-                {"uid":"shared-user","nickname":"企业当前","type":"ultimate","enterpriseId":"enterprise-current","oneidAccountId":"enterprise-one","pluginEnabled":true},
-                {"uid":"shared-user","nickname":"个人账号","type":"personal","pluginEnabled":true}
-            ]
-        }"#;
-        fs::write(&path, fixture).expect("fixture should be writable");
-        let bundle = auth::read_auth_bundle_from(&path).expect("fixture should parse");
-        let current = bundle
-            .current_account()
-            .expect("current account should exist");
+        let mut stored = signin("shared-user", "企业当前", 10);
+        stored.account_type = "ultimate".to_owned();
+        stored.enterprise_id = Some("enterprise-current".to_owned());
+        stored.identities = vec![StoredIdentity {
+            account_type: "personal".to_owned(),
+            enterprise_id: None,
+            nickname: Some("个人账号".to_owned()),
+            plugin_enabled: Some(true),
+        }];
+        let bundle = auth::build_bundle(&[stored]).expect("bundle should build");
+        let current = current_account(&bundle);
         let personal = bundle
             .accounts
             .iter()
             .find(|account| account.is_personal())
             .expect("personal account should exist");
+        let credentials = bundle
+            .credential_for(&personal.uid)
+            .expect("credentials should exist");
 
         let request = build_switch_request(
             &Client::new(),
             "https://example.invalid",
-            &bundle.credentials,
-            current,
+            credentials,
             personal,
         )
         .expect("request should build");
 
+        assert!(!current.is_personal());
         assert_eq!(
             request.url().as_str(),
             "https://example.invalid/v2/plugin/login/enterprise"
@@ -351,68 +362,43 @@ mod tests {
                 Some("enterprise-current")
             );
         }
-        fs::remove_file(path).expect("fixture should be removable");
     }
 
     #[test]
     fn switch_errors_do_not_echo_credentials() {
-        let (path, bundle) = fixture_bundle();
-        let current = bundle
-            .current_account()
-            .expect("current account should exist")
-            .clone();
-        let target = bundle.accounts.last().expect("target should exist").clone();
-        let mut credentials = bundle.credentials;
-        credentials.refresh_token.clear();
+        let bundle = fixture_bundle();
+        let target = enterprise_account(&bundle);
+        let credentials = AccountCredential {
+            uid: "current-user".to_owned(),
+            access_token: "source-access-secret".to_owned(),
+            refresh_token: String::new(),
+            domain: Some("example.invalid".to_owned()),
+            enterprise_id: None,
+        };
 
         let error = build_switch_request(
             &Client::new(),
             "https://example.invalid",
             &credentials,
-            &current,
-            &target,
+            target,
         )
         .expect_err("missing refresh token should fail");
 
         assert!(error.contains("Refresh Token"));
         assert!(!error.contains("source-access-secret"));
-        fs::remove_file(path).expect("fixture should be removable");
     }
 
     #[test]
-    #[ignore = "requires a current local WorkBuddy login and live official services"]
-    fn live_all_accounts_support_credit_and_idempotent_checkin() {
-        tauri::async_runtime::block_on(async {
-            let bundle = auth::read_auth_bundle().expect("local WorkBuddy login should be valid");
-            let client = network_client().expect("network client should initialize");
-            assert!(
-                !bundle.accounts.is_empty(),
-                "at least one account is required"
-            );
+    fn accounts_without_credentials_ask_for_a_new_login() {
+        let mut expired = signin("current-user", "当前账号", 10);
+        expired.expires_at_ms = Some(auth::unix_now_ms() - 1);
+        let bundle = auth::build_bundle(&[expired]).expect("bundle should build");
+        let account = current_account(&bundle);
 
-            for account in &bundle.accounts {
-                let session = session_for_account(&client, &bundle, account)
-                    .await
-                    .expect("account session should resolve");
-                let credit =
-                    crate::platforms::workbuddy::credit::fetch_credit_usage(&client, &session)
-                        .await
-                        .expect("account credit should load");
-                assert!(!credit.queried_at.is_empty());
+        let error =
+            tauri::async_runtime::block_on(session_for_account(&Client::new(), &bundle, account))
+                .err();
 
-                let checkin = crate::platforms::workbuddy::checkin::auto_claim_daily_checkin(
-                    &client, &session,
-                )
-                .await
-                .expect("account check-in should complete");
-                assert!(
-                    matches!(
-                        checkin.state.as_str(),
-                        "inactive" | "alreadyClaimed" | "claimedNow"
-                    ),
-                    "check-in state should be recognized"
-                );
-            }
-        });
+        assert_eq!(error.as_deref(), Some(EXPIRED_SIGNIN_MESSAGE));
     }
 }

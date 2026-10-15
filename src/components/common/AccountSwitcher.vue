@@ -7,11 +7,12 @@
         :value="selectedAccountId || ''"
         :disabled="disabled || accounts.length === 0"
         aria-describedby="account-switcher-details"
-        @change="emit('select', $event.target.value)"
+        @change="onChange"
       >
         <option v-for="account in accounts" :key="account.accountId" :value="account.accountId">
           {{ account.nickname }} · {{ accountTypeLabel(account.accountType) }}
         </option>
+        <option :value="ADD_ACCOUNT_VALUE">＋ 添加账号</option>
       </select>
     </label>
 
@@ -34,6 +35,10 @@
 <script setup>
 import { computed } from "vue";
 
+import { accountTypeLabel } from "../../utils/appState";
+
+const ADD_ACCOUNT_VALUE = "__add_account";
+
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
   selectedAccountId: { type: String, default: null },
@@ -41,7 +46,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["select", "reveal"]);
+const emit = defineEmits(["select", "reveal", "add"]);
 
 const selectedAccount = computed(
   () =>
@@ -56,9 +61,13 @@ const visibleAccountId = computed(() => {
   return props.revealedAccountIds[account.accountId] || account.maskedAccountId;
 });
 
-function accountTypeLabel(accountType) {
-  return String(accountType).toLowerCase() === "personal"
-    ? "个人账号"
-    : "企业账号";
+function onChange(event) {
+  const value = event.target.value;
+  if (value === ADD_ACCOUNT_VALUE) {
+    event.target.value = props.selectedAccountId || "";
+    emit("add");
+    return;
+  }
+  emit("select", value);
 }
 </script>

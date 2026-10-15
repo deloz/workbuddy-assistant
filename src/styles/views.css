@@ -46,6 +46,17 @@
   color: var(--danger) !important;
 }
 
+.login-guide__progress {
+  color: var(--accent) !important;
+}
+
+.login-guide__actions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-items: stretch;
+}
+
 .view-panel {
   width: min(1180px, 100%);
   min-width: 0;
@@ -485,4 +496,67 @@ td small {
   padding-right: 11px;
   padding-left: 11px;
   font-size: 12px;
+}
+
+.settings-section__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+
+.account-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.account-list__identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.account-list__identity strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-list__id {
+  color: var(--ink-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-list__meta {
+  display: flex;
+  min-width: 96px;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.account-list__state {
+  color: var(--success);
+}
+
+.account-list__state--warn {
+  color: var(--danger);
+}
+
+.account-list__actions {
+  display: flex;
+  gap: 8px;
 }

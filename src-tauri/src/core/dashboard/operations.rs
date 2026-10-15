@@ -11,11 +11,17 @@ use crate::platforms::workbuddy::credit;
 use crate::platforms::workbuddy::session::{network_client, session_for_account};
 
 pub(crate) async fn reload_accounts(runtime: &DashboardRuntime) -> DashboardSnapshot {
-    match auth::read_auth_bundle() {
+    match load_bundle(runtime).await {
         Ok(bundle) => runtime.install_bundle(&bundle).await,
-        Err(error) => runtime.clear_login(error.to_string()).await,
+        Err(message) => runtime.clear_login(message).await,
     }
     runtime.snapshot().await
+}
+
+/// 读取本机保存的浏览器登录，并在此过程中完成必要的续期。
+async fn load_bundle(runtime: &DashboardRuntime) -> Result<AuthBundle, String> {
+    let client = network_client()?;
+    auth::load_bundle(&client, runtime.signin_path()).await
 }
 
 pub(crate) async fn refresh_account_credit(
@@ -24,10 +30,10 @@ pub(crate) async fn refresh_account_credit(
     account_id: &str,
 ) -> Result<AccountCreditSnapshot, String> {
     let _operation = runtime.operation_lock.lock().await;
-    let bundle = match auth::read_auth_bundle() {
+    let client = network_client()?;
+    let bundle = match auth::load_bundle(&client, runtime.signin_path()).await {
         Ok(bundle) => bundle,
-        Err(error) => {
-            let message = error.to_string();
+        Err(message) => {
             runtime.clear_login(message.clone()).await;
             runtime.emit(app).await;
             return Err(message);
@@ -42,7 +48,6 @@ pub(crate) async fn refresh_account_credit(
     runtime.emit(app).await;
 
     let result = async {
-        let client = network_client()?;
         let session = session_for_account(&client, &bundle, &target).await?;
         credit::fetch_credit_usage(&client, &session).await
     }
@@ -64,17 +69,16 @@ async fn run_checkin_all_locked(
     runtime: &DashboardRuntime,
     app: &AppHandle,
 ) -> Result<CheckinBatchSnapshot, String> {
-    let bundle = match auth::read_auth_bundle() {
+    let client = network_client()?;
+    let bundle = match auth::load_bundle(&client, runtime.signin_path()).await {
         Ok(bundle) => bundle,
-        Err(error) => {
-            let message = error.to_string();
+        Err(message) => {
             runtime.clear_login(message.clone()).await;
             runtime.emit(app).await;
             return Err(message);
         }
     };
     runtime.install_bundle(&bundle).await;
-    let client = network_client()?;
     let targets = runtime.account_descriptors().await;
     let mut results = Vec::with_capacity(targets.len());
 
@@ -94,10 +98,10 @@ pub(crate) async fn run_checkin_account(
     account_id: &str,
 ) -> Result<CheckinAccountSnapshot, String> {
     let _operation = runtime.operation_lock.lock().await;
-    let bundle = match auth::read_auth_bundle() {
+    let client = network_client()?;
+    let bundle = match auth::load_bundle(&client, runtime.signin_path()).await {
         Ok(bundle) => bundle,
-        Err(error) => {
-            let message = error.to_string();
+        Err(message) => {
             runtime.clear_login(message.clone()).await;
             runtime.emit(app).await;
             return Err(message);
@@ -108,7 +112,6 @@ pub(crate) async fn run_checkin_account(
         .account(account_id)
         .cloned()
         .ok_or_else(|| "未找到该账号，请重新检测登录信息".to_owned())?;
-    let client = network_client()?;
 
     Ok(run_checkin_target(runtime, app, &client, &bundle, &target).await)
 }
@@ -136,7 +139,8 @@ pub(crate) async fn reveal_account_identifier(
     runtime: &DashboardRuntime,
     account_id: &str,
 ) -> Result<String, String> {
-    let bundle = auth::read_auth_bundle().map_err(|error| error.to_string())?;
+    let client = network_client()?;
+    let bundle = auth::load_bundle(&client, runtime.signin_path()).await?;
     runtime.install_bundle(&bundle).await;
     bundle
         .account(account_id)

@@ -15,6 +15,7 @@
           :disabled="store.busy"
           @select="store.selectAccount"
           @reveal="store.revealAccountIdentifier"
+          @add="store.beginSignin"
         />
 
         <button
@@ -62,15 +63,41 @@
         <div class="login-guide__number" aria-hidden="true">1</div>
         <div>
           <p class="section-kicker">需要先登录</p>
-          <h1>请先打开 WorkBuddy 完成登录，然后返回这里重新检测</h1>
-          <p>登录完成后，WorkBuddy助手会自动读取账号列表、加载当前账号额度，并检查全部账号的今日签到。</p>
+          <h1>用系统浏览器完成 WorkBuddy 登录</h1>
+          <p>点击「浏览器登录」会在系统浏览器打开 WorkBuddy 登录页面，正常登录后这里会自动读取账号列表、加载当前账号额度，并检查全部账号的今日签到。凭据只保存在本机，可以添加多个账号。</p>
+          <p v-if="store.signinStatus" class="login-guide__progress" role="status">
+            {{ store.signinStatus }}
+          </p>
           <p v-if="store.snapshot.loginError || store.error" class="login-guide__reason" role="status">
             {{ store.snapshot.loginError || store.error }}
           </p>
         </div>
-        <button class="button button--primary" type="button" :disabled="store.loading" @click="store.reloadAccounts">
-          {{ store.loading ? "检测中…" : "重新检测" }}
-        </button>
+        <div class="login-guide__actions">
+          <button
+            class="button button--primary"
+            type="button"
+            :disabled="store.loading || store.signinBusy"
+            @click="store.beginSignin"
+          >
+            {{ store.signinBusy ? "等待登录完成…" : "浏览器登录" }}
+          </button>
+          <button
+            v-if="store.signinUrl"
+            class="button button--secondary"
+            type="button"
+            @click="store.openSigninPage"
+          >
+            重新打开登录页面
+          </button>
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="store.loading"
+            @click="store.reloadAccounts"
+          >
+            {{ store.loading ? "检测中…" : "重新检测" }}
+          </button>
+        </div>
       </section>
 
       <template v-else>

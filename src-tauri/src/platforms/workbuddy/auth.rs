@@ -1,22 +1,21 @@
 use std::collections::HashSet;
-use std::error::Error;
-use std::fmt;
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use reqwest::Client;
 
-const AUTH_RELATIVE_PATH: [&str; 5] = [
-    "CodeBuddyExtension",
-    "Data",
-    "Public",
-    "auth",
-    "workbuddy-desktop.info",
-];
-const MAX_AUTH_FILE_SIZE: u64 = 1_048_576;
+use super::signin::{self, SigninTokens};
+use crate::data::workbuddy_signin::{SigninStore, StoredSignin};
 
+/// 本机没有任何可用登录时的统一提示。
+pub(crate) const NO_SIGNIN_MESSAGE: &str = "尚未登录，请先完成 WorkBuddy 登录";
+
+/// Access Token 到期前多久开始续期。
+const REFRESH_MARGIN_MS: i64 = 60_000;
+const PERSONAL_TYPE: &str = "personal";
+const ENTERPRISE_TYPE: &str = "enterprise";
+
+/// 一个身份：同一个用户 ID 下的个人或某个企业。
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AccountIdentity {
     uid: String,
@@ -34,12 +33,13 @@ pub(crate) struct AccountDescriptor {
     pub account_type: String,
     pub enterprise_id: Option<String>,
     pub is_current: bool,
+    pub needs_signin: bool,
     identity: AccountIdentity,
 }
 
 impl AccountDescriptor {
     pub fn is_personal(&self) -> bool {
-        self.account_type.eq_ignore_ascii_case("personal")
+        self.account_type.eq_ignore_ascii_case(PERSONAL_TYPE)
     }
 
     pub fn same_identity(&self, other: &Self) -> bool {
@@ -47,17 +47,20 @@ impl AccountDescriptor {
     }
 }
 
-pub(crate) struct AuthCredentials {
+/// 一个账号（一个用户 ID）的登录凭据。
+pub(crate) struct AccountCredential {
     pub uid: String,
     pub access_token: String,
     pub refresh_token: String,
-    pub expires_at_ms: Option<i64>,
     pub domain: Option<String>,
+    pub enterprise_id: Option<String>,
 }
 
 pub(crate) struct AuthBundle {
-    pub credentials: AuthCredentials,
     pub accounts: Vec<AccountDescriptor>,
+    /// 每个用户 ID 一条；不可用（已过期且续期失败）的账号不在这里。
+    pub credentials: Vec<AccountCredential>,
+    pub current_account_id: Option<String>,
 }
 
 impl AuthBundle {
@@ -67,288 +70,246 @@ impl AuthBundle {
             .find(|account| account.account_id == account_id)
     }
 
-    pub fn current_account(&self) -> Option<&AccountDescriptor> {
-        self.accounts.iter().find(|account| account.is_current)
+    pub fn credential_for(&self, uid: &str) -> Option<&AccountCredential> {
+        self.credentials
+            .iter()
+            .find(|credential| credential.uid == uid)
     }
 }
 
-#[derive(Debug)]
-pub enum AuthReadError {
-    MissingLocalAppData,
-    MissingAccountUid,
-    Io(io::Error),
-    TooLarge(u64),
-    InvalidJson(serde_json::Error),
-    MissingAuthObject,
-    InvalidCredentials(String),
-}
+/// 读取本机保存的浏览器登录，必要时先续期，再组装成可用的账号清单。
+pub(crate) async fn load_bundle(client: &Client, path: &Path) -> Result<AuthBundle, String> {
+    let mut store = SigninStore::load(path.to_path_buf());
+    if store.is_empty() {
+        return Err(NO_SIGNIN_MESSAGE.to_owned());
+    }
 
-impl fmt::Display for AuthReadError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingLocalAppData => {
-                write!(formatter, "无法确定 WorkBuddy 本机登录信息位置")
-            }
-            Self::MissingAccountUid => write!(formatter, "WorkBuddy 登录信息缺少当前用户 ID"),
-            Self::Io(source) if source.kind() == io::ErrorKind::NotFound => write!(
-                formatter,
-                "未检测到 WorkBuddy 登录信息，请先打开 WorkBuddy 完成登录"
-            ),
-            Self::Io(_) => write!(formatter, "无法读取 WorkBuddy 本机登录信息"),
-            Self::TooLarge(size) => write!(
-                formatter,
-                "WorkBuddy 登录信息文件异常（{size} 字节），已停止读取"
-            ),
-            Self::InvalidJson(_) => write!(formatter, "WorkBuddy 登录信息格式无效"),
-            Self::MissingAuthObject => write!(formatter, "WorkBuddy 登录信息缺少认证数据"),
-            Self::InvalidCredentials(message) => formatter.write_str(message),
+    let mut signins = store.signins().to_vec();
+    let mut renewed = false;
+    for signin in &mut signins {
+        if !needs_refresh(signin) {
+            continue;
+        }
+        let Ok(tokens) = signin::refresh(
+            client,
+            &signin.refresh_token,
+            signin.domain.as_deref(),
+            signin.enterprise_id.as_deref(),
+        )
+        .await
+        else {
+            continue;
+        };
+        apply_tokens(signin, &tokens);
+        // 续期成功后顺带刷新身份列表；失败时保留上一次的身份。
+        if let Ok(identities) = signin::fetch_identities(
+            client,
+            &signin.access_token,
+            &signin.uid,
+            signin.domain.as_deref(),
+        )
+        .await
+            && !identities.is_empty()
+        {
+            signin.identities = identities;
+        }
+        renewed = true;
+    }
+    if renewed {
+        store.replace(signins.clone());
+        if let Err(error) = store.persist() {
+            eprintln!("无法保存登录凭据：{error}");
         }
     }
+
+    build_bundle(&signins)
 }
 
-impl Error for AuthReadError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Io(source) => Some(source),
-            Self::InvalidJson(source) => Some(source),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredAuthFile {
-    account: Option<StoredAccount>,
-    auth: Option<StoredAuth>,
-    #[serde(default)]
-    accounts: Vec<StoredAccount>,
-    #[serde(default)]
-    all_accounts: Vec<StoredAccount>,
-}
-
-#[derive(Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredAccount {
-    uid: Option<String>,
-    nickname: Option<String>,
-    #[serde(rename = "type")]
-    edition: Option<String>,
-    account_type: Option<String>,
-    enterprise_id: Option<String>,
-    plugin_enabled: Option<bool>,
-    oneid_account_id: Option<String>,
-    uin: Option<String>,
-    last_login: Option<bool>,
-    is_current_one_id_enterprise: Option<bool>,
-    is_current_one_id_personal: Option<bool>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredAuth {
-    #[serde(default)]
-    access_token: String,
-    #[serde(default)]
-    refresh_token: String,
-    domain: Option<String>,
-    expires_at: Option<i64>,
-}
-
-pub fn default_auth_path() -> Result<PathBuf, AuthReadError> {
-    let local_app_data = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or(AuthReadError::MissingLocalAppData)?;
-
-    Ok(AUTH_RELATIVE_PATH
+pub(crate) fn build_bundle(signins: &[StoredSignin]) -> Result<AuthBundle, String> {
+    let mut ordered: Vec<&StoredSignin> = signins
         .iter()
-        .fold(local_app_data, |path, segment| path.join(segment)))
-}
+        .filter(|signin| !signin.uid.trim().is_empty())
+        .collect();
+    ordered.sort_by_key(|signin| std::cmp::Reverse(signin.added_at_ms));
 
-fn read_stored_file(path: &Path) -> Result<StoredAuthFile, AuthReadError> {
-    let metadata = fs::metadata(path).map_err(AuthReadError::Io)?;
-    if metadata.len() > MAX_AUTH_FILE_SIZE {
-        return Err(AuthReadError::TooLarge(metadata.len()));
+    let mut accounts = Vec::new();
+    let mut credentials = Vec::new();
+    let mut seen = HashSet::new();
+    let mut current_account_id = None;
+
+    for (index, signin) in ordered.iter().enumerate() {
+        let uid = signin.uid.trim().to_owned();
+        let usable = credential_usable(signin);
+        if usable {
+            credentials.push(AccountCredential {
+                uid: uid.clone(),
+                access_token: signin.access_token.trim().to_owned(),
+                refresh_token: signin.refresh_token.trim().to_owned(),
+                domain: signin.domain.clone(),
+                enterprise_id: signin.enterprise_id.clone(),
+            });
+        }
+
+        let nickname = default_nickname(&signin.nickname, &uid);
+        let is_current = index == 0;
+        let login_identity = AccountIdentity {
+            uid: uid.clone(),
+            account_type: normalized_type(signin.enterprise_id.as_deref()).to_owned(),
+            enterprise_id: normalized_enterprise_id(signin.enterprise_id.as_deref()),
+        };
+        if let Some(account_id) = push_account(
+            &mut accounts,
+            &mut seen,
+            login_identity,
+            &nickname,
+            is_current,
+            !usable,
+        ) && is_current
+        {
+            current_account_id = Some(account_id);
+        }
+
+        for identity in &signin.identities {
+            if identity.plugin_enabled == Some(false) {
+                continue;
+            }
+            let candidate = AccountIdentity {
+                uid: uid.clone(),
+                account_type: normalized_type(identity.enterprise_id.as_deref()).to_owned(),
+                enterprise_id: normalized_enterprise_id(identity.enterprise_id.as_deref()),
+            };
+            let nickname = identity
+                .nickname
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map_or_else(|| nickname.clone(), str::to_owned);
+            push_account(
+                &mut accounts,
+                &mut seen,
+                candidate,
+                &nickname,
+                false,
+                !usable,
+            );
+        }
     }
 
-    let content = fs::read_to_string(path).map_err(AuthReadError::Io)?;
-    serde_json::from_str(&content).map_err(AuthReadError::InvalidJson)
-}
-
-pub(crate) fn read_auth_bundle() -> Result<AuthBundle, String> {
-    let path = default_auth_path().map_err(|error| error.to_string())?;
-    read_auth_bundle_from(&path).map_err(|error| error.to_string())
-}
-
-pub(crate) fn read_auth_bundle_from(path: &Path) -> Result<AuthBundle, AuthReadError> {
-    let stored = read_stored_file(path)?;
-    let auth = stored.auth.ok_or(AuthReadError::MissingAuthObject)?;
-    let current = stored.account.ok_or(AuthReadError::MissingAccountUid)?;
-    let current_uid = non_empty(current.uid.clone()).ok_or(AuthReadError::MissingAccountUid)?;
-
-    let credentials = AuthCredentials {
-        uid: current_uid,
-        access_token: auth.access_token,
-        refresh_token: auth.refresh_token,
-        expires_at_ms: auth.expires_at,
-        domain: non_empty(auth.domain),
-    };
-    validate_credentials(&credentials).map_err(AuthReadError::InvalidCredentials)?;
-
-    let mut switchable = stored.accounts;
-    switchable.extend(stored.all_accounts);
-    let accounts = build_account_catalog(current, switchable)?;
+    if accounts.is_empty() {
+        return Err(NO_SIGNIN_MESSAGE.to_owned());
+    }
 
     Ok(AuthBundle {
-        credentials,
         accounts,
+        credentials,
+        current_account_id,
     })
 }
 
-fn build_account_catalog(
-    current: StoredAccount,
-    switchable: Vec<StoredAccount>,
-) -> Result<Vec<AccountDescriptor>, AuthReadError> {
-    let current_match = switchable
-        .iter()
-        .enumerate()
-        .filter_map(|(index, candidate)| {
-            match_score(&current, candidate).map(|score| (index, score))
-        })
-        .max_by_key(|(_, score)| *score)
-        .map(|(index, _)| index);
-    let current = current_match
-        .and_then(|index| switchable.get(index))
-        .map_or(current.clone(), |candidate| {
-            merge_account(&current, candidate)
-        });
-
-    let current_descriptor = descriptor_from(current, true)?;
-    let mut seen = HashSet::from([current_descriptor.identity.clone()]);
-    let mut accounts = vec![current_descriptor];
-
-    for stored in switchable {
-        if stored.plugin_enabled != Some(true) {
-            continue;
-        }
-        let descriptor = descriptor_from(stored, false)?;
-        if seen.insert(descriptor.identity.clone()) {
-            accounts.push(descriptor);
-        }
+/// 把续期结果合并回登录记录；接口没返回的字段保留原值。
+fn apply_tokens(signin: &mut StoredSignin, tokens: &SigninTokens) {
+    signin.access_token = tokens.access_token.clone();
+    if !tokens.refresh_token.trim().is_empty() {
+        signin.refresh_token = tokens.refresh_token.clone();
     }
-
-    Ok(accounts)
+    if let Some(expires_at) = tokens.expires_at_ms {
+        signin.expires_at_ms = Some(expires_at);
+    }
+    if let Some(refresh_expires_at) = tokens.refresh_expires_at_ms {
+        signin.refresh_expires_at_ms = Some(refresh_expires_at);
+    }
+    if let Some(domain) = tokens.domain.clone() {
+        signin.domain = Some(domain);
+    }
+    if let Some(token_type) = tokens.token_type.clone() {
+        signin.token_type = Some(token_type);
+    }
 }
 
-fn match_score(current: &StoredAccount, candidate: &StoredAccount) -> Option<u8> {
-    if non_empty(current.uid.clone())? != non_empty(candidate.uid.clone())? {
+fn needs_refresh(signin: &StoredSignin) -> bool {
+    signin
+        .expires_at_ms
+        .is_some_and(|expires_at| unix_now_ms() >= expires_at.saturating_sub(REFRESH_MARGIN_MS))
+}
+
+fn credential_usable(signin: &StoredSignin) -> bool {
+    !signin.access_token.trim().is_empty()
+        && signin
+            .expires_at_ms
+            .is_none_or(|expires_at| expires_at > unix_now_ms())
+}
+
+fn push_account(
+    accounts: &mut Vec<AccountDescriptor>,
+    seen: &mut HashSet<AccountIdentity>,
+    identity: AccountIdentity,
+    nickname: &str,
+    is_current: bool,
+    needs_signin: bool,
+) -> Option<String> {
+    if !seen.insert(identity.clone()) {
         return None;
     }
-
-    let current_type = normalized_account_type(current);
-    let candidate_type = normalized_account_type(candidate);
-    if current_type != candidate_type {
-        return None;
-    }
-
-    let mut score = 1;
-    if same_non_empty(&current.oneid_account_id, &candidate.oneid_account_id) {
-        score += 8;
-    }
-    if same_non_empty(&current.uin, &candidate.uin) {
-        score += 4;
-    }
-    if candidate.last_login == Some(true) {
-        score += 2;
-    }
-    if candidate.is_current_one_id_enterprise == Some(true)
-        || candidate.is_current_one_id_personal == Some(true)
-    {
-        score += 1;
-    }
-    Some(score)
-}
-
-fn same_non_empty(left: &Option<String>, right: &Option<String>) -> bool {
-    match (non_empty(left.clone()), non_empty(right.clone())) {
-        (Some(left), Some(right)) => left == right,
-        _ => false,
-    }
-}
-
-fn merge_account(current: &StoredAccount, candidate: &StoredAccount) -> StoredAccount {
-    StoredAccount {
-        uid: current.uid.clone().or_else(|| candidate.uid.clone()),
-        nickname: non_empty(current.nickname.clone()).or_else(|| candidate.nickname.clone()),
-        edition: non_empty(current.edition.clone()).or_else(|| candidate.edition.clone()),
-        account_type: non_empty(current.account_type.clone())
-            .or_else(|| candidate.account_type.clone()),
-        enterprise_id: non_empty(current.enterprise_id.clone())
-            .or_else(|| candidate.enterprise_id.clone()),
-        plugin_enabled: current.plugin_enabled.or(candidate.plugin_enabled),
-        oneid_account_id: current
-            .oneid_account_id
-            .clone()
-            .or_else(|| candidate.oneid_account_id.clone()),
-        uin: current.uin.clone().or_else(|| candidate.uin.clone()),
-        last_login: current.last_login.or(candidate.last_login),
-        is_current_one_id_enterprise: current
-            .is_current_one_id_enterprise
-            .or(candidate.is_current_one_id_enterprise),
-        is_current_one_id_personal: current
-            .is_current_one_id_personal
-            .or(candidate.is_current_one_id_personal),
-    }
+    let descriptor = descriptor_from(identity, nickname, is_current, needs_signin);
+    let account_id = descriptor.account_id.clone();
+    accounts.push(descriptor);
+    Some(account_id)
 }
 
 fn descriptor_from(
-    stored: StoredAccount,
+    identity: AccountIdentity,
+    nickname: &str,
     is_current: bool,
-) -> Result<AccountDescriptor, AuthReadError> {
-    let account_type = normalized_account_type(&stored);
-    let uid = non_empty(stored.uid.clone()).ok_or(AuthReadError::MissingAccountUid)?;
-    let enterprise_id = non_empty(stored.enterprise_id.clone());
-    let display_id = account_display_id(&stored, &account_type, &uid, enterprise_id.as_deref());
-    let identity = AccountIdentity {
-        uid: uid.clone(),
-        account_type: account_type.clone(),
-        enterprise_id: enterprise_id.clone(),
-    };
-    let account_id = opaque_account_id(&identity);
-
-    Ok(AccountDescriptor {
-        account_id,
-        nickname: non_empty(stored.nickname).unwrap_or_else(|| "未命名账号".to_owned()),
+    needs_signin: bool,
+) -> AccountDescriptor {
+    let display_id = account_display_id(&identity);
+    AccountDescriptor {
+        account_id: opaque_account_id(&identity),
         masked_display_id: mask_identifier(&display_id),
         display_id,
-        uid,
-        account_type,
-        enterprise_id,
+        uid: identity.uid.clone(),
+        account_type: identity.account_type.clone(),
+        enterprise_id: identity.enterprise_id.clone(),
         is_current,
+        needs_signin,
+        nickname: nickname.to_owned(),
         identity,
-    })
-}
-
-fn account_display_id(
-    account: &StoredAccount,
-    account_type: &str,
-    uid: &str,
-    enterprise_id: Option<&str>,
-) -> String {
-    if account_type.eq_ignore_ascii_case("personal") {
-        return non_empty(account.uin.clone()).unwrap_or_else(|| uid.to_owned());
     }
-
-    non_empty(account.oneid_account_id.clone())
-        .or_else(|| enterprise_id.map(str::to_owned))
-        .unwrap_or_else(|| uid.to_owned())
 }
 
-fn normalized_account_type(account: &StoredAccount) -> String {
-    non_empty(account.edition.clone())
-        .or_else(|| non_empty(account.account_type.clone()))
-        .unwrap_or_else(|| "personal".to_owned())
-        .to_ascii_lowercase()
+/// 只看企业标识：有企业标识就是企业身份，否则是个人身份（与 WorkBuddy 插件一致）。
+fn normalized_type(enterprise_id: Option<&str>) -> &'static str {
+    if normalized_enterprise_id(enterprise_id).is_some() {
+        ENTERPRISE_TYPE
+    } else {
+        PERSONAL_TYPE
+    }
+}
+
+fn normalized_enterprise_id(enterprise_id: Option<&str>) -> Option<String> {
+    enterprise_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn default_nickname(nickname: &str, uid: &str) -> String {
+    let nickname = nickname.trim();
+    if nickname.is_empty() {
+        uid.to_owned()
+    } else {
+        nickname.to_owned()
+    }
+}
+
+fn account_display_id(identity: &AccountIdentity) -> String {
+    if identity.account_type == PERSONAL_TYPE {
+        return identity.uid.clone();
+    }
+    identity
+        .enterprise_id
+        .clone()
+        .unwrap_or_else(|| identity.uid.clone())
 }
 
 fn opaque_account_id(identity: &AccountIdentity) -> String {
@@ -373,28 +334,11 @@ fn opaque_account_id(identity: &AccountIdentity) -> String {
     format!("account-{hash:016x}")
 }
 
-pub(crate) fn validate_credentials(credentials: &AuthCredentials) -> Result<(), String> {
-    if credentials.access_token.trim().is_empty() {
-        return Err("当前账号没有可用的 Access Token，请先在 WorkBuddy 登录".to_owned());
-    }
-    if credentials
-        .expires_at_ms
-        .is_some_and(|expires_at| expires_at <= unix_now_ms())
-    {
-        return Err("Access Token 已过期，请在 WorkBuddy 重新登录后重试".to_owned());
-    }
-    Ok(())
-}
-
 pub(crate) fn unix_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
         .unwrap_or_default()
-}
-
-fn non_empty(value: Option<String>) -> Option<String> {
-    value.filter(|text| !text.trim().is_empty())
 }
 
 pub(crate) fn mask_identifier(value: &str) -> String {
@@ -411,147 +355,188 @@ pub(crate) fn mask_identifier(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::workbuddy_signin::StoredIdentity;
 
-    fn fixture_path(name: &str) -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after Unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "workbuddy-assistant-auth-{}-{nonce}-{name}",
-            std::process::id()
-        ))
+    const FAR_FUTURE_MS: i64 = 4_102_444_800_000;
+
+    fn signin(uid: &str, added_at_ms: i64) -> StoredSignin {
+        StoredSignin {
+            uid: uid.to_owned(),
+            nickname: format!("账号 {uid}"),
+            account_type: PERSONAL_TYPE.to_owned(),
+            enterprise_id: None,
+            domain: Some("www.codebuddy.cn".to_owned()),
+            token_type: Some("Bearer".to_owned()),
+            access_token: format!("access-{uid}"),
+            refresh_token: format!("refresh-{uid}"),
+            expires_at_ms: Some(FAR_FUTURE_MS),
+            refresh_expires_at_ms: None,
+            added_at_ms,
+            identities: Vec::new(),
+        }
     }
 
-    #[test]
-    fn parses_current_personal_enterprise_and_ignores_disabled_accounts() {
-        let path = fixture_path("catalog.info");
-        let fixture = r#"{
-            "account": {"uid":"shared-user","nickname":"企业当前","type":"ultimate","oneidAccountId":"enterprise-one"},
-            "auth": {"accessToken":"secret-access","refreshToken":"secret-refresh","expiresAt":4102444800000},
-            "accounts": [
-                {"uid":"shared-user","uin":"personal-uin","nickname":"企业当前","type":"ultimate","enterpriseId":"enterprise-a","oneidAccountId":"enterprise-one","pluginEnabled":true},
-                {"uid":"shared-user","uin":"personal-uin","nickname":"个人身份","type":"personal","pluginEnabled":true},
-                {"uid":"disabled-user","nickname":"已禁用","type":"personal","pluginEnabled":false}
-            ],
-            "allAccounts": [
-                {"uid":"shared-user","nickname":"企业重复","type":"ultimate","enterpriseId":"enterprise-a","pluginEnabled":true}
-            ]
-        }"#;
-        fs::write(&path, fixture).expect("fixture should be writable");
-
-        let bundle = read_auth_bundle_from(&path).expect("fixture should parse");
-
-        assert_eq!(bundle.accounts.len(), 2);
-        assert!(bundle.accounts[0].is_current);
-        assert_eq!(
-            bundle.accounts[0].enterprise_id.as_deref(),
-            Some("enterprise-a")
-        );
-        assert!(!bundle.accounts[0].is_personal());
-        assert!(bundle.accounts[1].is_personal());
-        assert_ne!(bundle.accounts[0].account_id, bundle.accounts[1].account_id);
-        assert_eq!(bundle.accounts[0].display_id, "enterprise-one");
-        assert_eq!(bundle.accounts[1].display_id, "personal-uin");
-        assert_ne!(bundle.accounts[0].display_id, bundle.accounts[1].display_id);
-        assert!(
-            bundle
-                .accounts
-                .iter()
-                .all(|account| account.uid != "disabled-user")
-        );
-        assert_eq!(bundle.credentials.refresh_token, "secret-refresh");
-
-        fs::remove_file(path).expect("fixture should be removable");
-    }
-
-    #[test]
-    fn same_uid_enterprise_identities_remain_distinct() {
-        let current = StoredAccount {
-            uid: Some("same-uid".to_owned()),
-            nickname: Some("企业甲".to_owned()),
-            edition: Some("ultimate".to_owned()),
-            enterprise_id: Some("enterprise-a".to_owned()),
-            ..StoredAccount::default()
-        };
-        let switchable = vec![
-            StoredAccount {
-                uid: Some("same-uid".to_owned()),
-                nickname: Some("企业甲".to_owned()),
-                edition: Some("ultimate".to_owned()),
-                enterprise_id: Some("enterprise-a".to_owned()),
-                plugin_enabled: Some(true),
-                ..StoredAccount::default()
-            },
-            StoredAccount {
-                uid: Some("same-uid".to_owned()),
-                nickname: Some("企业乙".to_owned()),
-                edition: Some("ultimate".to_owned()),
-                enterprise_id: Some("enterprise-b".to_owned()),
-                plugin_enabled: Some(true),
-                ..StoredAccount::default()
-            },
-        ];
-
-        let accounts = build_account_catalog(current, switchable).expect("catalog should build");
-
-        assert_eq!(accounts.len(), 2);
-        assert!(!accounts[0].same_identity(&accounts[1]));
-        assert_ne!(accounts[0].account_id, accounts[1].account_id);
-    }
-
-    #[test]
-    fn invalid_json_error_never_echoes_contents() {
-        let path = fixture_path("invalid.info");
-        fs::write(&path, r#"{"accessToken":"do-not-echo""#).expect("fixture should be writable");
-
-        let error = match read_auth_bundle_from(&path) {
-            Ok(_) => panic!("fixture should fail"),
-            Err(error) => error,
-        };
-
-        assert_eq!(error.to_string(), "WorkBuddy 登录信息格式无效");
-        assert!(!error.to_string().contains("do-not-echo"));
-        fs::remove_file(path).expect("fixture should be removable");
-    }
-
-    #[test]
-    fn rejects_oversized_missing_and_expired_credentials() {
-        let path = fixture_path("too-large.info");
-        fs::write(&path, vec![b' '; MAX_AUTH_FILE_SIZE as usize + 1])
-            .expect("fixture should be writable");
-        assert!(matches!(
-            read_auth_bundle_from(&path),
-            Err(AuthReadError::TooLarge(_))
-        ));
-        fs::remove_file(path).expect("fixture should be removable");
-
-        let missing = AuthCredentials {
-            uid: "user-123".to_owned(),
-            access_token: " ".to_owned(),
-            refresh_token: String::new(),
-            expires_at_ms: None,
-            domain: None,
-        };
-        let missing_error = validate_credentials(&missing).expect_err("token should be required");
-        assert!(missing_error.contains("Access Token"));
-        assert!(!missing_error.contains("user-123"));
-
-        let expired = AuthCredentials {
-            uid: "user-123".to_owned(),
-            access_token: "secret-access".to_owned(),
-            refresh_token: "secret-refresh".to_owned(),
-            expires_at_ms: Some(unix_now_ms() - 1),
-            domain: None,
-        };
-        let expired_error = validate_credentials(&expired).expect_err("token should be expired");
-        assert!(expired_error.contains("过期"));
-        assert!(!expired_error.contains("secret-access"));
+    fn identity(account_type: &str, enterprise_id: Option<&str>) -> StoredIdentity {
+        StoredIdentity {
+            account_type: account_type.to_owned(),
+            enterprise_id: enterprise_id.map(str::to_owned),
+            nickname: None,
+            plugin_enabled: Some(true),
+        }
     }
 
     #[test]
     fn masks_identifiers_without_exposing_short_values() {
         assert_eq!(mask_identifier("15e8641234566945"), "15e864…6945");
         assert_eq!(mask_identifier("short"), "••••");
+    }
+
+    #[test]
+    fn without_signins_the_bundle_is_a_login_request() {
+        assert_eq!(build_bundle(&[]).err(), Some(NO_SIGNIN_MESSAGE.to_owned()));
+
+        let blank = StoredSignin {
+            uid: "  ".to_owned(),
+            ..signin("ignored", 1)
+        };
+        assert_eq!(
+            build_bundle(&[blank]).err(),
+            Some(NO_SIGNIN_MESSAGE.to_owned())
+        );
+    }
+
+    #[test]
+    fn merges_the_login_identity_with_the_enumerated_ones() {
+        let mut stored = signin("shared-user", 10);
+        stored.account_type = "ultimate".to_owned();
+        stored.enterprise_id = Some("enterprise-a".to_owned());
+        stored.identities = vec![
+            identity("ultimate", Some("enterprise-a")),
+            identity("personal", None),
+            identity("enterprise", Some("enterprise-b")),
+        ];
+
+        let bundle = build_bundle(&[stored]).expect("bundle should build");
+
+        assert_eq!(bundle.accounts.len(), 3);
+        assert!(bundle.accounts[0].is_current);
+        assert_eq!(
+            bundle.accounts[0].enterprise_id.as_deref(),
+            Some("enterprise-a")
+        );
+        assert_eq!(bundle.accounts[0].display_id, "enterprise-a");
+        assert!(bundle.accounts[1].is_personal());
+        assert_eq!(bundle.accounts[1].display_id, "shared-user");
+        assert_eq!(
+            bundle.accounts[2].enterprise_id.as_deref(),
+            Some("enterprise-b")
+        );
+        assert_eq!(
+            bundle.current_account_id.as_deref(),
+            Some(bundle.accounts[0].account_id.as_str())
+        );
+        for account in &bundle.accounts {
+            assert!(!account.needs_signin);
+        }
+        assert_eq!(bundle.credentials.len(), 1);
+        assert_eq!(bundle.credentials[0].uid, "shared-user");
+    }
+
+    #[test]
+    fn keeps_one_entry_per_identity_and_hides_disabled_ones() {
+        let mut stored = signin("shared-user", 10);
+        stored.identities = vec![
+            identity("enterprise", Some("enterprise-a")),
+            identity("ultimate", Some("enterprise-a")),
+            identity("personal", None),
+            StoredIdentity {
+                plugin_enabled: Some(false),
+                ..identity("enterprise", Some("enterprise-disabled"))
+            },
+        ];
+
+        let bundle = build_bundle(&[stored]).expect("bundle should build");
+
+        assert_eq!(bundle.accounts.len(), 2);
+        assert!(bundle.accounts[0].is_personal());
+        assert!(bundle.accounts[0].is_current);
+        assert_eq!(
+            bundle.accounts[1].enterprise_id.as_deref(),
+            Some("enterprise-a")
+        );
+        assert!(
+            bundle
+                .accounts
+                .iter()
+                .all(|account| account.enterprise_id.as_deref() != Some("enterprise-disabled"))
+        );
+    }
+
+    #[test]
+    fn multiple_signins_share_one_credential_each_and_current_is_the_newest() {
+        let mut older = signin("user-old", 1);
+        older.identities = vec![identity("personal", None)];
+        let newer = signin("user-new", 5);
+
+        let bundle = build_bundle(&[older, newer]).expect("bundle should build");
+
+        assert_eq!(bundle.accounts.len(), 2);
+        assert!(bundle.accounts[0].uid == "user-new");
+        assert!(bundle.accounts[0].is_current);
+        assert!(!bundle.accounts[1].is_current);
+        assert_eq!(bundle.credentials.len(), 2);
+        assert!(bundle.credential_for("user-old").is_some());
+        assert!(bundle.credential_for("user-new").is_some());
+        assert!(bundle.credential_for("missing").is_none());
+    }
+
+    #[test]
+    fn expired_signins_keep_their_accounts_but_ask_for_a_new_login() {
+        let mut expired = signin("user-expired", 2);
+        expired.expires_at_ms = Some(unix_now_ms() - 1);
+
+        let bundle = build_bundle(&[expired]).expect("bundle should build");
+
+        assert_eq!(bundle.accounts.len(), 1);
+        assert!(bundle.accounts[0].needs_signin);
+        assert!(bundle.credentials.is_empty());
+    }
+
+    #[test]
+    fn apply_tokens_keeps_previous_values_when_the_response_omits_them() {
+        let mut stored = signin("user-a", 1);
+        apply_tokens(
+            &mut stored,
+            &SigninTokens {
+                access_token: "new-access".to_owned(),
+                refresh_token: String::new(),
+                expires_at_ms: None,
+                refresh_expires_at_ms: Some(4_102_444_800_001),
+                domain: None,
+                token_type: None,
+            },
+        );
+
+        assert_eq!(stored.access_token, "new-access");
+        assert_eq!(stored.refresh_token, "refresh-user-a");
+        assert_eq!(stored.expires_at_ms, Some(FAR_FUTURE_MS));
+        assert_eq!(stored.domain.as_deref(), Some("www.codebuddy.cn"));
+        assert_eq!(stored.token_type.as_deref(), Some("Bearer"));
+        assert_eq!(stored.refresh_expires_at_ms, Some(4_102_444_800_001));
+    }
+
+    #[test]
+    fn only_signins_near_expiry_are_renewed() {
+        let mut fresh = signin("user-fresh", 1);
+        fresh.expires_at_ms = Some(unix_now_ms() + 10 * 60_000);
+        assert!(!needs_refresh(&fresh));
+
+        let mut almost = signin("user-almost", 1);
+        almost.expires_at_ms = Some(unix_now_ms() + 30_000);
+        assert!(needs_refresh(&almost));
+
+        let mut unknown = signin("user-unknown", 1);
+        unknown.expires_at_ms = None;
+        assert!(!needs_refresh(&unknown));
     }
 }

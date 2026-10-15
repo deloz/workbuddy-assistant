@@ -5,6 +5,8 @@ import { listen } from "@tauri-apps/api/event";
 
 import {
   createEmptyDashboardSnapshot,
+  formatSigninStatus,
+  isSigninBusy,
   normalizeError,
   resolveSelectedAccountId,
 } from "../utils/appState";
@@ -18,6 +20,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const checkinInvoking = ref(false);
   const error = ref(null);
   const revealedAccountIds = ref({});
+  const signinState = ref("idle");
+  const signinUrl = ref(null);
   let stopListening = null;
 
   const accounts = computed(() => snapshot.value.accounts || []);
@@ -35,6 +39,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const busy = computed(
     () => loading.value || refreshingAccountId.value !== null || checkinLoading.value,
   );
+  const signinBusy = computed(() => isSigninBusy(signinState.value));
+  const signinStatus = computed(() => formatSigninStatus(signinState.value));
 
   function applySnapshot(nextSnapshot) {
     snapshot.value = nextSnapshot || createEmptyDashboardSnapshot();
@@ -177,6 +183,69 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
+  // 先取登录地址并在系统浏览器打开，然后等待用户在浏览器里完成登录。
+  async function beginSignin() {
+    if (signinBusy.value) {
+      return false;
+    }
+    signinState.value = "opening";
+    error.value = null;
+    try {
+      const start = await invoke("begin_workbuddy_signin");
+      signinUrl.value = start?.url || null;
+      signinState.value = "waiting";
+    } catch (reason) {
+      signinState.value = "error";
+      error.value = normalizeError(reason);
+      return false;
+    }
+    return completeSignin();
+  }
+
+  // 等待浏览器登录完成，成功后装载账号并加载当前账号额度。
+  async function completeSignin() {
+    try {
+      applySnapshot(await invoke("complete_workbuddy_signin"));
+      signinState.value = "done";
+      signinUrl.value = null;
+      revealedAccountIds.value = {};
+      const account = currentAccount.value;
+      if (account && account.credit.status === "idle") {
+        await refreshAccountCredit(account.accountId);
+      }
+      return true;
+    } catch (reason) {
+      signinState.value = "error";
+      error.value = normalizeError(reason);
+      return false;
+    }
+  }
+
+  async function openSigninPage() {
+    error.value = null;
+    try {
+      await invoke("open_workbuddy_signin_page");
+      return true;
+    } catch (reason) {
+      error.value = normalizeError(reason);
+      return false;
+    }
+  }
+
+  async function signOutAccount(accountId) {
+    error.value = null;
+    try {
+      applySnapshot(await invoke("sign_out_account", { accountId }));
+      revealedAccountIds.value = {};
+      signinState.value = "idle";
+      signinUrl.value = null;
+      return true;
+    } catch (reason) {
+      error.value = normalizeError(reason);
+      return false;
+    }
+  }
+
   return {
     snapshot,
     accounts,
@@ -187,6 +256,10 @@ export const useDashboardStore = defineStore("dashboard", () => {
     refreshingAccountId,
     checkinLoading,
     busy,
+    signinBusy,
+    signinState,
+    signinStatus,
+    signinUrl,
     error,
     revealedAccountIds,
     initialize,
@@ -195,5 +268,9 @@ export const useDashboardStore = defineStore("dashboard", () => {
     refreshAccountCredit,
     runCheckinCurrent,
     revealAccountIdentifier,
+    beginSignin,
+    completeSignin,
+    openSigninPage,
+    signOutAccount,
   };
 });

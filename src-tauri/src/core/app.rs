@@ -9,7 +9,8 @@ pub(crate) fn run() {
         .setup(|app| {
             let local_data_dir = app.path().app_local_data_dir()?;
             let history_path = local_data_dir.join("checkin-history.json");
-            app.manage(DashboardRuntime::with_history_path(history_path));
+            let signin_path = local_data_dir.join("workbuddy-signin.json");
+            app.manage(DashboardRuntime::with_paths(history_path, signin_path));
             tray::setup(app)?;
             scheduler::start(app.handle().clone());
             Ok(())
@@ -26,6 +27,10 @@ pub(crate) fn run() {
         .invoke_handler(tauri::generate_handler![
             app_commands::get_dashboard_state,
             app_commands::reload_accounts,
+            app_commands::begin_workbuddy_signin,
+            app_commands::open_workbuddy_signin_page,
+            app_commands::complete_workbuddy_signin,
+            app_commands::sign_out_account,
             app_commands::refresh_account_credit,
             app_commands::run_checkin_all_command,
             app_commands::run_checkin_account,

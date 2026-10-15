@@ -7,6 +7,80 @@
       </div>
     </header>
 
+    <section class="settings-section" aria-labelledby="accounts-title">
+      <header class="settings-section__heading">
+        <h2 id="accounts-title">WorkBuddy 账号</h2>
+        <button
+          class="button button--secondary"
+          type="button"
+          :disabled="dashboard.loading || dashboard.signinBusy"
+          @click="dashboard.beginSignin"
+        >
+          {{ dashboard.signinBusy ? "等待登录完成…" : "添加账号" }}
+        </button>
+      </header>
+
+      <p
+        v-if="dashboard.signinStatus"
+        class="settings-message settings-message--neutral"
+        role="status"
+        aria-live="polite"
+      >
+        {{ dashboard.signinStatus }}
+      </p>
+      <p
+        v-if="dashboard.error"
+        class="settings-message settings-message--error"
+        role="status"
+        aria-live="polite"
+      >
+        {{ dashboard.error }}
+      </p>
+
+      <div v-if="dashboard.accounts.length" class="account-list">
+        <article
+          v-for="account in dashboard.accounts"
+          :key="account.accountId"
+          class="account-list__item"
+        >
+          <div class="account-list__identity">
+            <strong>{{ account.nickname }}</strong>
+            <span class="account-list__id">{{ account.maskedAccountId }}</span>
+          </div>
+          <div class="account-list__meta">
+            <span>{{ accountTypeLabel(account.accountType) }}</span>
+            <span
+              class="account-list__state"
+              :class="{ 'account-list__state--warn': account.needsSignin }"
+            >
+              {{ accountStatusLabel(account) }}
+            </span>
+          </div>
+          <div class="account-list__actions">
+            <button
+              class="button button--secondary settings-link"
+              type="button"
+              :disabled="dashboard.signinBusy"
+              @click="dashboard.beginSignin"
+            >
+              重新登录
+            </button>
+            <button
+              class="button button--secondary settings-link"
+              type="button"
+              :disabled="dashboard.busy"
+              @click="dashboard.signOutAccount(account.accountId)"
+            >
+              移除
+            </button>
+          </div>
+        </article>
+      </div>
+      <p v-else class="settings-message settings-message--neutral" role="status">
+        尚未登录，请先完成 WorkBuddy 登录。
+      </p>
+    </section>
+
     <section class="settings-section" aria-labelledby="about-title">
       <h2 id="about-title">关于</h2>
       <dl class="about-list">
@@ -76,10 +150,17 @@
 <script setup>
 import { computed, onMounted } from "vue";
 
+import { useDashboardStore } from "../../stores/dashboard";
 import { EXTERNAL_LINKS, useSettingsStore } from "../../stores/settings";
-import { formatUpdateMessage, getUpdateMessageTone } from "../../utils/appState";
+import {
+  accountStatusLabel,
+  accountTypeLabel,
+  formatUpdateMessage,
+  getUpdateMessageTone,
+} from "../../utils/appState";
 
 const store = useSettingsStore();
+const dashboard = useDashboardStore();
 const links = [
   { label: "项目仓库", url: EXTERNAL_LINKS.repository },
 ];

@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  accountStatusLabel,
+  accountTypeLabel,
   createEmptyDashboardSnapshot,
+  formatSigninStatus,
   formatUpdateMessage,
   getUpdateMessageTone,
+  isSigninBusy,
   isActionableUpdate,
   normalizeError,
   resolveSelectedAccountId,
@@ -43,6 +47,31 @@ test("normalizes errors and update message tones", () => {
   assert.equal(getUpdateMessageTone({ error: "失败" }), "error");
   assert.equal(getUpdateMessageTone({ result: { status: "updateAvailable" } }), "available");
   assert.equal(getUpdateMessageTone({ result: { status: "upToDate" } }), "neutral");
+});
+
+test("describes the browser sign-in progress", () => {
+  assert.equal(formatSigninStatus("idle"), "");
+  assert.equal(formatSigninStatus("opening"), "正在打开登录页面…");
+  assert.equal(
+    formatSigninStatus("waiting"),
+    "已在浏览器打开登录页面，等待完成…最多 5 分钟",
+  );
+  assert.equal(formatSigninStatus("error"), "登录未完成，可重新点击浏览器登录");
+  assert.equal(isSigninBusy("opening"), true);
+  assert.equal(isSigninBusy("waiting"), true);
+  assert.equal(isSigninBusy("done"), false);
+  assert.equal(isSigninBusy("idle"), false);
+});
+
+test("labels account types and expired sign-ins", () => {
+  assert.equal(accountTypeLabel("personal"), "个人账号");
+  assert.equal(accountTypeLabel("enterprise"), "企业账号");
+  assert.equal(accountStatusLabel({ accountType: "personal" }), "个人账号");
+  assert.equal(accountStatusLabel({ accountType: "enterprise" }), "企业账号");
+  assert.equal(
+    accountStatusLabel({ accountType: "enterprise", needsSignin: true }),
+    "需重新登录",
+  );
 });
 
 test("only exposes complete update results as actionable", () => {

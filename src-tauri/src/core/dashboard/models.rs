@@ -33,9 +33,17 @@ pub struct AccountView {
     pub masked_account_id: String,
     pub account_type: String,
     pub is_current: bool,
+    pub needs_signin: bool,
     pub credit: AccountCreditState,
     pub checkin: AccountCheckinState,
     pub checkin_history: Vec<CheckinHistoryEntry>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SigninStartView {
+    pub url: String,
+    pub expires_at_ms: i64,
 }
 
 #[derive(Clone, Serialize)]

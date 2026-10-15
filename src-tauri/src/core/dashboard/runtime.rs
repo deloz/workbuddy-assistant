@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{Local, NaiveDate, TimeZone};
@@ -15,6 +16,21 @@ use crate::data::checkin_history::{
 use crate::platforms::workbuddy::auth::{AccountDescriptor, AuthBundle};
 use crate::platforms::workbuddy::checkin::CheckinSnapshot;
 use crate::platforms::workbuddy::credit::CreditSnapshot;
+
+/// 等待用户在浏览器里完成的一次登录。
+#[derive(Clone)]
+pub(crate) struct PendingSignin {
+    pub state: String,
+    pub url: String,
+    pub started_at_ms: i64,
+}
+
+impl PendingSignin {
+    fn is_fresh(&self, now_ms: i64) -> bool {
+        now_ms.saturating_sub(self.started_at_ms)
+            < crate::platforms::workbuddy::signin::LOGIN_TIMEOUT_MS
+    }
+}
 
 struct AccountCache {
     descriptor: AccountDescriptor,
@@ -37,29 +53,56 @@ struct RuntimeState {
 pub struct DashboardRuntime {
     state: RwLock<RuntimeState>,
     pub(super) operation_lock: Mutex<()>,
+    signin_path: PathBuf,
+    pending_signin: Mutex<Option<PendingSignin>>,
     exiting: AtomicBool,
 }
 
 impl Default for DashboardRuntime {
     fn default() -> Self {
-        Self {
-            state: RwLock::new(RuntimeState::default()),
-            operation_lock: Mutex::new(()),
-            exiting: AtomicBool::new(false),
-        }
+        Self::with_paths(PathBuf::new(), PathBuf::new())
     }
 }
 
 impl DashboardRuntime {
-    pub fn with_history_path(path: std::path::PathBuf) -> Self {
+    pub fn with_paths(history_path: PathBuf, signin_path: PathBuf) -> Self {
         Self {
             state: RwLock::new(RuntimeState {
-                checkin_history: CheckinHistoryStore::load(path),
+                checkin_history: CheckinHistoryStore::load(history_path),
                 ..RuntimeState::default()
             }),
             operation_lock: Mutex::new(()),
+            signin_path,
+            pending_signin: Mutex::new(None),
             exiting: AtomicBool::new(false),
         }
+    }
+
+    pub(crate) fn signin_path(&self) -> &Path {
+        &self.signin_path
+    }
+
+    /// 尚未超时的待完成登录；超时即视为没有。
+    pub(crate) async fn pending_signin(&self) -> Option<PendingSignin> {
+        let mut pending = self.pending_signin.lock().await;
+        match pending.as_ref() {
+            Some(signin) if signin.is_fresh(crate::platforms::workbuddy::auth::unix_now_ms()) => {
+                Some(signin.clone())
+            }
+            Some(_) => {
+                *pending = None;
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub(crate) async fn set_pending_signin(&self, signin: PendingSignin) {
+        *self.pending_signin.lock().await = Some(signin);
+    }
+
+    pub(crate) async fn clear_pending_signin(&self) {
+        *self.pending_signin.lock().await = None;
     }
 
     pub async fn snapshot(&self) -> DashboardSnapshot {
@@ -77,6 +120,7 @@ impl DashboardRuntime {
                     masked_account_id: account.descriptor.masked_display_id.clone(),
                     account_type: account.descriptor.account_type.clone(),
                     is_current: account.descriptor.is_current,
+                    needs_signin: account.descriptor.needs_signin,
                     credit: account.credit.clone(),
                     checkin: account.checkin.clone(),
                     checkin_history: state
@@ -122,9 +166,7 @@ impl DashboardRuntime {
             .collect();
         state.logged_in = true;
         state.login_error = None;
-        state.current_account_id = bundle
-            .current_account()
-            .map(|account| account.account_id.clone());
+        state.current_account_id = bundle.current_account_id.clone();
     }
 
     pub(super) async fn clear_login(&self, error: String) {

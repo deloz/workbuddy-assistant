@@ -28,6 +28,36 @@ export function resolveSelectedAccountId(snapshot, selectedAccountId) {
   return accounts[0]?.accountId || null;
 }
 
+export function isSigninBusy(state) {
+  return state === "opening" || state === "waiting";
+}
+
+export function formatSigninStatus(state) {
+  switch (state) {
+    case "opening":
+      return "正在打开登录页面…";
+    case "waiting":
+      return "已在浏览器打开登录页面，等待完成…最多 5 分钟";
+    case "done":
+      return "登录成功，正在加载账号额度…";
+    case "error":
+      return "登录未完成，可重新点击浏览器登录";
+    default:
+      return "";
+  }
+}
+
+export function accountTypeLabel(accountType) {
+  return String(accountType).toLowerCase() === "personal" ? "个人账号" : "企业账号";
+}
+
+export function accountStatusLabel(account) {
+  if (account?.needsSignin) {
+    return "需重新登录";
+  }
+  return accountTypeLabel(account?.accountType);
+}
+
 export function formatUpdateMessage({ checking, error, result }) {
   if (checking) {
     return "";

@@ -2,7 +2,7 @@ use tauri::State;
 
 use super::dashboard::{
     self, AccountCreditSnapshot, CheckinAccountSnapshot, CheckinBatchSnapshot, DashboardRuntime,
-    DashboardSnapshot,
+    DashboardSnapshot, SigninStartView,
 };
 use super::update::{self, UpdateCheckSnapshot};
 
@@ -18,6 +18,39 @@ pub(crate) async fn reload_accounts(
     state: State<'_, DashboardRuntime>,
 ) -> Result<DashboardSnapshot, String> {
     Ok(dashboard::reload_accounts(state.inner()).await)
+}
+
+#[tauri::command]
+pub(crate) async fn begin_workbuddy_signin(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+) -> Result<SigninStartView, String> {
+    dashboard::begin_signin(state.inner(), &app).await
+}
+
+#[tauri::command]
+pub(crate) async fn open_workbuddy_signin_page(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+) -> Result<(), String> {
+    dashboard::open_signin_page(state.inner(), &app).await
+}
+
+#[tauri::command]
+pub(crate) async fn complete_workbuddy_signin(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+) -> Result<DashboardSnapshot, String> {
+    dashboard::complete_signin(state.inner(), &app).await
+}
+
+#[tauri::command]
+pub(crate) async fn sign_out_account(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+    account_id: String,
+) -> Result<DashboardSnapshot, String> {
+    dashboard::sign_out_account(state.inner(), &app, &account_id).await
 }
 
 #[tauri::command]
