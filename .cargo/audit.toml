@@ -1,0 +1,14 @@
+# cargo-audit 仓库级配置：漏洞门禁。
+# 只忽略本仓库无法修复的告警，其余漏洞一律让门禁失败。
+[advisories]
+ignore = [
+    # rkyv 0.7 没有补丁（修复版本 0.8.17 属于破坏性升级）。它仅作为 rust_decimal
+    # 的可选 feature 出现在 Cargo.lock，并未启用也未编译：cargo tree -i rkyv 无输出。
+    "RUSTSEC-2026-0235",
+]
+
+# 说明（无需 ignore，仅作为警告出现，不会让门禁失败）：
+# - RUSTSEC-2024-0429 glib：只由 Linux GTK3 依赖链引入（gtk <- tray-icon/tao/wry），
+#   不在 Windows 依赖图中，也不编译进发布的 Windows 程序。
+# - RUSTSEC-2025-0075/0080/0081/0098/0100、RUSTSEC-2024-0370：上游 crate 停止维护，
+#   由 Tauri 依赖链带入，本仓库无法替换。

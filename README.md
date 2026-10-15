@@ -60,6 +60,8 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
+依赖漏洞由 `Security` 工作流在推送 `main`、提交 PR 和每周一自动检查：前端运行 `npm audit --audit-level=high`，Rust 运行 `cargo audit`。需要放行的告警记录在 `.cargo/audit.toml` 并写明原因，其余漏洞会让工作流失败。本地可执行 `npm.cmd audit --audit-level=high --registry=https://registry.npmjs.org/` 与 `cargo audit` 自查。
+
 构建 Windows 便携程序和 NSIS 安装器：
 
 ```powershell
