@@ -1,13 +1,20 @@
 //! 成长中心执行历史：每个账号按时间保留最近若干条，文件损坏时回退为空。
 
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-const HISTORY_VERSION: u8 = 1;
-const MAX_HISTORY_FILE_BYTES: u64 = 1024 * 1024;
+use crate::data::file_store::{
+    JsonFileSpec, VersionedDocument, load_json_or_default, write_json_atomic,
+};
+
+const HISTORY_FILE: JsonFileSpec = JsonFileSpec {
+    max_bytes: 1024 * 1024,
+    version: 1,
+    oversize_message: "成长中心历史文件过大",
+    version_message: "不支持的成长中心历史版本",
+};
 const MAX_HISTORY_PER_ACCOUNT: usize = 90;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -37,10 +44,16 @@ struct StoredGrowthEntry {
     entry: GrowthHistoryEntry,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Deserialize, Serialize)]
 struct GrowthHistoryDocument {
     version: u8,
     entries: Vec<StoredGrowthEntry>,
+}
+
+impl VersionedDocument for GrowthHistoryDocument {
+    fn version(&self) -> u8 {
+        self.version
+    }
 }
 
 #[derive(Default)]
@@ -51,12 +64,10 @@ pub struct GrowthHistoryStore {
 
 impl GrowthHistoryStore {
     pub fn load(path: PathBuf) -> Self {
-        let entries = read_entries(&path)
-            .or_else(|_| read_entries(&temporary_path(&path)))
-            .unwrap_or_default();
+        let document = load_json_or_default::<GrowthHistoryDocument>(&path, HISTORY_FILE);
         Self {
             path: Some(path),
-            entries,
+            entries: document.entries,
         }
     }
 
@@ -109,50 +120,19 @@ impl GrowthHistoryStore {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&GrowthHistoryDocument {
-            version: HISTORY_VERSION,
-            entries: self.entries.clone(),
-        })
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let temporary = temporary_path(path);
-        fs::write(&temporary, bytes)?;
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-        fs::rename(temporary, path)
+        write_json_atomic(
+            path,
+            &GrowthHistoryDocument {
+                version: HISTORY_FILE.version,
+                entries: self.entries.clone(),
+            },
+        )
     }
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    path.with_extension("json.tmp")
-}
-
-fn read_entries(path: &Path) -> io::Result<Vec<StoredGrowthEntry>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    if fs::metadata(path)?.len() > MAX_HISTORY_FILE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "成长中心历史文件过大",
-        ));
-    }
-    let document: GrowthHistoryDocument = serde_json::from_slice(&fs::read(path)?)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if document.version != HISTORY_VERSION {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "不支持的成长中心历史版本",
-        ));
-    }
-    Ok(document.entries)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;

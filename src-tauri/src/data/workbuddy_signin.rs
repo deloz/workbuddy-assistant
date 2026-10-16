@@ -1,11 +1,18 @@
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-const SIGNIN_VERSION: u8 = 1;
-const MAX_SIGNIN_FILE_BYTES: u64 = 1024 * 1024;
+use crate::data::file_store::{
+    JsonFileSpec, VersionedDocument, load_json_or_default, write_json_atomic,
+};
+
+const SIGNIN_FILE: JsonFileSpec = JsonFileSpec {
+    max_bytes: 1024 * 1024,
+    version: 1,
+    oversize_message: "登录凭据文件过大",
+    version_message: "登录凭据文件版本不受支持",
+};
 
 /// 一个账号的浏览器登录结果。凭据以明文 JSON 保存在应用数据目录，仅当前用户可读。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -48,11 +55,17 @@ pub(crate) struct StoredIdentity {
     pub plugin_enabled: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Deserialize, Serialize)]
 struct SigninDocument {
     version: u8,
     #[serde(default)]
     signins: Vec<StoredSignin>,
+}
+
+impl VersionedDocument for SigninDocument {
+    fn version(&self) -> u8 {
+        self.version
+    }
 }
 
 pub(crate) struct SigninStore {
@@ -62,12 +75,10 @@ pub(crate) struct SigninStore {
 
 impl SigninStore {
     pub fn load(path: PathBuf) -> Self {
-        let signins = read_signins(&path)
-            .or_else(|_| read_signins(&temporary_path(&path)))
-            .unwrap_or_default();
+        let document = load_json_or_default::<SigninDocument>(&path, SIGNIN_FILE);
         Self {
             path: Some(path),
-            signins,
+            signins: document.signins,
         }
     }
 
@@ -111,50 +122,19 @@ impl SigninStore {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&SigninDocument {
-            version: SIGNIN_VERSION,
-            signins: self.signins.clone(),
-        })
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let temporary_path = temporary_path(path);
-        fs::write(&temporary_path, bytes)?;
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-        fs::rename(temporary_path, path)
+        write_json_atomic(
+            path,
+            &SigninDocument {
+                version: SIGNIN_FILE.version,
+                signins: self.signins.clone(),
+            },
+        )
     }
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    path.with_extension("json.tmp")
-}
-
-fn read_signins(path: &Path) -> io::Result<Vec<StoredSignin>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    if fs::metadata(path)?.len() > MAX_SIGNIN_FILE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "登录凭据文件过大",
-        ));
-    }
-    let document: SigninDocument = serde_json::from_slice(&fs::read(path)?)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if document.version != SIGNIN_VERSION {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "登录凭据文件版本不受支持",
-        ));
-    }
-    Ok(document.signins)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;

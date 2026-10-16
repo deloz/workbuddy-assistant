@@ -1,13 +1,20 @@
 //! 应用设置：目前只有成长中心自动化开关；文件损坏时回落到默认值。
 
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-const SETTINGS_VERSION: u8 = 1;
-const MAX_SETTINGS_FILE_BYTES: u64 = 64 * 1024;
+use crate::data::file_store::{
+    JsonFileSpec, VersionedDocument, read_json_document, write_json_atomic,
+};
+
+const SETTINGS_FILE: JsonFileSpec = JsonFileSpec {
+    max_bytes: 64 * 1024,
+    version: 1,
+    oversize_message: "设置文件过大",
+    version_message: "不支持的设置版本",
+};
 
 fn default_growth_automation_enabled() -> bool {
     true
@@ -28,11 +35,17 @@ impl Default for AppSettings {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Deserialize, Serialize)]
 struct SettingsDocument {
     version: u8,
     #[serde(flatten)]
     settings: AppSettings,
+}
+
+impl VersionedDocument for SettingsDocument {
+    fn version(&self) -> u8 {
+        self.version
+    }
 }
 
 pub struct SettingsStore {
@@ -42,10 +55,11 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load(path: PathBuf) -> Self {
-        let settings = read_settings(&path).unwrap_or_default();
+        let document: SettingsDocument =
+            read_json_document(&path, SETTINGS_FILE).unwrap_or_default();
         Self {
             path: Some(path),
-            settings,
+            settings: document.settings,
         }
     }
 
@@ -63,47 +77,19 @@ impl SettingsStore {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(&SettingsDocument {
-            version: SETTINGS_VERSION,
-            settings: self.settings.clone(),
-        })
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        let temporary = temporary_path(path);
-        fs::write(&temporary, bytes)?;
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-        fs::rename(temporary, path)
+        write_json_atomic(
+            path,
+            &SettingsDocument {
+                version: SETTINGS_FILE.version,
+                settings: self.settings.clone(),
+            },
+        )
     }
-}
-
-fn temporary_path(path: &Path) -> PathBuf {
-    path.with_extension("json.tmp")
-}
-
-fn read_settings(path: &Path) -> io::Result<AppSettings> {
-    if !path.exists() {
-        return Ok(AppSettings::default());
-    }
-    if fs::metadata(path)?.len() > MAX_SETTINGS_FILE_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "设置文件过大"));
-    }
-    let document: SettingsDocument = serde_json::from_slice(&fs::read(path)?)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if document.version != SETTINGS_VERSION {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "不支持的设置版本",
-        ));
-    }
-    Ok(document.settings)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
