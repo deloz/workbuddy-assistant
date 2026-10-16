@@ -194,7 +194,7 @@ fn switch_endpoint(base_url: &str, target: &AccountDescriptor) -> Result<Url, St
     {
         let mut segments = endpoint
             .path_segments_mut()
-            .map_err(|_| "账号服务地址无效".to_owned())?;
+            .map_err(|()| "账号服务地址无效".to_owned())?;
         segments.pop_if_empty();
         segments.extend(["v2", "plugin", "login", "enterprise"]);
         if !target.is_personal() {

@@ -208,9 +208,9 @@ pub(crate) fn build_bundle(signins: &[StoredSignin]) -> Result<AuthBundle, Strin
 
 /// 把续期结果合并回登录记录；接口没返回的字段保留原值。
 fn apply_tokens(signin: &mut StoredSignin, tokens: &SigninTokens) {
-    signin.access_token = tokens.access_token.clone();
+    signin.access_token.clone_from(&tokens.access_token);
     if !tokens.refresh_token.trim().is_empty() {
-        signin.refresh_token = tokens.refresh_token.clone();
+        signin.refresh_token.clone_from(&tokens.refresh_token);
     }
     if let Some(expires_at) = tokens.expires_at_ms {
         signin.expires_at_ms = Some(expires_at);
@@ -277,7 +277,7 @@ fn descriptor_from(
     }
 }
 
-/// 只看企业标识：有企业标识就是企业身份，否则是个人身份（与 WorkBuddy 插件一致）。
+/// 只看企业标识：有企业标识就是企业身份，否则是个人身份（与 `WorkBuddy` 插件一致）。
 fn normalized_type(enterprise_id: Option<&str>) -> &'static str {
     if normalized_enterprise_id(enterprise_id).is_some() {
         ENTERPRISE_TYPE
@@ -313,7 +313,7 @@ fn account_display_id(identity: &AccountIdentity) -> String {
 }
 
 fn opaque_account_id(identity: &AccountIdentity) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in identity
         .uid
         .bytes()
@@ -329,7 +329,7 @@ fn opaque_account_id(identity: &AccountIdentity) -> String {
         )
     {
         hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     format!("account-{hash:016x}")
 }
@@ -337,7 +337,7 @@ fn opaque_account_id(identity: &AccountIdentity) -> String {
 pub(crate) fn unix_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or_default()
 }
 
@@ -481,7 +481,7 @@ mod tests {
         let bundle = build_bundle(&[older, newer]).expect("bundle should build");
 
         assert_eq!(bundle.accounts.len(), 2);
-        assert!(bundle.accounts[0].uid == "user-new");
+        assert_eq!(bundle.accounts[0].uid, "user-new");
         assert!(bundle.accounts[0].is_current);
         assert!(!bundle.accounts[1].is_current);
         assert_eq!(bundle.credentials.len(), 2);

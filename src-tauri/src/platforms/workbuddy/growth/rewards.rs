@@ -22,7 +22,7 @@ impl GrowthRun<'_> {
                 return;
             }
             Err(failure) => {
-                self.note_call_failure("lottery", "开盲盒", "查询抽奖机会", failure);
+                self.note_call_failure("lottery", "开盲盒", "查询抽奖机会", &failure);
                 return;
             }
         };
@@ -67,7 +67,7 @@ impl GrowthRun<'_> {
                 }
             }
             Err(failure) => {
-                self.note_call_failure("lottery", "开盲盒", "开盲盒", failure);
+                self.note_call_failure("lottery", "开盲盒", "开盲盒", &failure);
             }
         }
     }
@@ -91,7 +91,7 @@ impl GrowthRun<'_> {
                 return;
             }
             Err(failure) => {
-                self.note_call_failure("buddy", "Buddy 盲盒", "查询 Buddy 能量", failure);
+                self.note_call_failure("buddy", "Buddy 盲盒", "查询 Buddy 能量", &failure);
                 return;
             }
         };
@@ -124,7 +124,7 @@ impl GrowthRun<'_> {
                 );
             }
             Err(failure) => {
-                self.note_call_failure("buddy", "Buddy 盲盒", "开 Buddy 盲盒", failure);
+                self.note_call_failure("buddy", "Buddy 盲盒", "开 Buddy 盲盒", &failure);
             }
         }
     }

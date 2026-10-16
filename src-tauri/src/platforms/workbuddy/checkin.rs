@@ -14,6 +14,10 @@ const CLAIM_ENDPOINT: &str = "https://copilot.tencent.com/v2/billing/meter/daily
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "直接映射签到接口的字段，前端按同一组布尔值渲染，换成枚举反而多一层转换"
+)]
 pub struct CheckinSnapshot {
     pub checked_at: String,
     pub state: String,
@@ -118,20 +122,17 @@ pub(crate) async fn auto_claim_daily_checkin(
         }
     };
 
-    match request_status(client, session).await {
-        Ok(mut current) => {
-            current.today_checked_in = true;
-            current.streak_days = current.streak_days.max(claim.streak_days);
-            current.is_streak_day = claim.is_streak_day;
-            Ok(snapshot(current, "claimedNow", true, claim.credit))
-        }
-        Err(_) => {
-            status.today_checked_in = true;
-            status.streak_days = claim.streak_days;
-            status.is_streak_day = claim.is_streak_day;
-            status.total_credits += claim.credit;
-            Ok(snapshot(status, "claimedNow", true, claim.credit))
-        }
+    if let Ok(mut current) = request_status(client, session).await {
+        current.today_checked_in = true;
+        current.streak_days = current.streak_days.max(claim.streak_days);
+        current.is_streak_day = claim.is_streak_day;
+        Ok(snapshot(current, "claimedNow", true, claim.credit))
+    } else {
+        status.today_checked_in = true;
+        status.streak_days = claim.streak_days;
+        status.is_streak_day = claim.is_streak_day;
+        status.total_credits += claim.credit;
+        Ok(snapshot(status, "claimedNow", true, claim.credit))
     }
 }
 

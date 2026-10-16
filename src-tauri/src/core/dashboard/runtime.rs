@@ -218,7 +218,9 @@ impl DashboardRuntime {
             .collect();
         state.logged_in = true;
         state.login_error = None;
-        state.current_account_id = bundle.current_account_id.clone();
+        state
+            .current_account_id
+            .clone_from(&bundle.current_account_id);
     }
 
     pub(super) async fn clear_login(&self, error: String) {
@@ -279,7 +281,7 @@ impl DashboardRuntime {
             .iter_mut()
             .find(|account| account.descriptor.account_id == account_id)
         {
-            account.credit.status = "loading".to_owned();
+            "loading".clone_into(&mut account.credit.status);
             account.credit.error = None;
         }
     }
@@ -301,13 +303,13 @@ impl DashboardRuntime {
         let updated_at = Some(Local::now().to_rfc3339());
         match result {
             Ok(snapshot) => {
-                account.credit.status = "ready".to_owned();
+                "ready".clone_into(&mut account.credit.status);
                 account.credit.data = Some(snapshot);
                 account.credit.error = None;
                 account.credit.updated_at = updated_at;
             }
             Err(error) => {
-                account.credit.status = "error".to_owned();
+                "error".clone_into(&mut account.credit.status);
                 account.credit.error = Some(error);
                 account.credit.updated_at = updated_at;
             }
@@ -322,7 +324,7 @@ impl DashboardRuntime {
             .iter_mut()
             .find(|account| account.descriptor.account_id == account_id)
         {
-            account.checkin.status = "loading".to_owned();
+            "loading".clone_into(&mut account.checkin.status);
             account.checkin.error = None;
         }
     }
@@ -362,14 +364,14 @@ impl DashboardRuntime {
         };
         let snapshot = match result {
             Ok(snapshot) => {
-                account.checkin.status = snapshot.state.clone();
+                account.checkin.status.clone_from(&snapshot.state);
                 account.checkin.data = Some(snapshot);
                 account.checkin.error = None;
                 account.checkin.updated_at = Some(updated_at);
                 CheckinAccountSnapshot::from_state(&account.checkin)
             }
             Err(error) => {
-                account.checkin.status = "error".to_owned();
+                "error".clone_into(&mut account.checkin.status);
                 account.checkin.error = Some(error);
                 account.checkin.updated_at = Some(updated_at);
                 CheckinAccountSnapshot::from_state(&account.checkin)
@@ -388,7 +390,7 @@ impl DashboardRuntime {
             .iter_mut()
             .find(|account| account.descriptor.account_id == account_id)
         {
-            account.growth.status = "running".to_owned();
+            "running".clone_into(&mut account.growth.status);
             account.growth.error = None;
         }
     }
@@ -427,7 +429,7 @@ impl DashboardRuntime {
                     needs_attention: snapshot.needs_attention,
                     error: None,
                 });
-                account.growth.status = "ready".to_owned();
+                "ready".clone_into(&mut account.growth.status);
                 account.growth.data = Some(snapshot);
                 account.growth.error = None;
                 account.growth.updated_at = Some(updated_at);
@@ -445,7 +447,7 @@ impl DashboardRuntime {
                     needs_attention: true,
                     error: Some(error.clone()),
                 };
-                account.growth.status = "error".to_owned();
+                "error".clone_into(&mut account.growth.status);
                 account.growth.error = Some(error);
                 account.growth.updated_at = Some(updated_at);
                 (

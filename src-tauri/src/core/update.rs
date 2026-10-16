@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -113,12 +114,10 @@ fn unpublished_snapshot(current: &Version) -> UpdateCheckSnapshot {
 fn compare_release(current: &Version, release_tag: &str) -> Result<UpdateCheckSnapshot, String> {
     let latest =
         parse_version(release_tag).map_err(|_| "最新版本号格式无效，请稍后重试".to_owned())?;
-    let status = if latest > *current {
-        UpdateCheckStatus::UpdateAvailable
-    } else if latest == *current {
-        UpdateCheckStatus::UpToDate
-    } else {
-        UpdateCheckStatus::Ahead
+    let status = match latest.cmp(current) {
+        Ordering::Greater => UpdateCheckStatus::UpdateAvailable,
+        Ordering::Equal => UpdateCheckStatus::UpToDate,
+        Ordering::Less => UpdateCheckStatus::Ahead,
     };
     let release_url =
         (status == UpdateCheckStatus::UpdateAvailable).then(|| LATEST_RELEASE_URL.to_owned());

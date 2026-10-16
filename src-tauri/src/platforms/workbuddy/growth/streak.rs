@@ -22,6 +22,10 @@ const REDEEM_TIERS: [(&str, &str, &str, u32); 3] = [
 ];
 
 impl GrowthRun<'_> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "补登是一条线性流程（查状态→查日历→逐日补登），拆开会割断步骤记账"
+    )]
     pub(super) async fn run_makeup(&mut self) {
         if !self.budget_left() {
             self.note_skipped("makeup", "断登补登", "时间预算耗尽，补登跳过");
@@ -31,7 +35,7 @@ impl GrowthRun<'_> {
         let streak = match self.get_json("/streak").await {
             Ok(streak) => streak,
             Err(failure) => {
-                self.note_call_failure("makeup", "断登补登", "查询连登状态", failure);
+                self.note_call_failure("makeup", "断登补登", "查询连登状态", &failure);
                 return;
             }
         };
@@ -56,7 +60,7 @@ impl GrowthRun<'_> {
         let heatmap = match self.get_json("/heatmap").await {
             Ok(heatmap) => heatmap,
             Err(failure) => {
-                self.note_call_failure("makeup", "断登补登", "查询补登日历", failure);
+                self.note_call_failure("makeup", "断登补登", "查询补登日历", &failure);
                 return;
             }
         };
@@ -74,7 +78,7 @@ impl GrowthRun<'_> {
         };
 
         let limit = (cards as usize).min(MAKEUP_MAX_PER_RUN);
-        let mut used = 0;
+        let mut used = 0_u32;
         for date in candidates.iter().take(limit) {
             if !self.budget_left() {
                 self.note_skipped("makeup", "断登补登", "时间预算耗尽，剩余补登下次再做");
@@ -86,7 +90,7 @@ impl GrowthRun<'_> {
                     used += 1;
                     self.streak_stale = true;
                     // 优先用服务端给的余额，接口没给才按本地递减兜底。
-                    let local_left = cards.saturating_sub(used as u32);
+                    let local_left = cards.saturating_sub(used);
                     let left = makeup_cards_opt(&body)
                         .unwrap_or(local_left)
                         .min(local_left);
@@ -117,21 +121,22 @@ impl GrowthRun<'_> {
                     break;
                 }
                 Err(failure) => {
-                    self.note_call_failure("makeup", "断登补登", "补登", failure);
+                    self.note_call_failure("makeup", "断登补登", "补登", &failure);
                     return;
                 }
             }
         }
 
-        if used > 0 {
+        let used_count = used as usize;
+        if used_count > 0 {
             let remaining = self.overview.makeup_cards.unwrap_or(0);
-            if candidates.len() > used && remaining > 0 {
+            if candidates.len() > used_count && remaining > 0 {
                 self.note_normal(
                     "makeup",
                     "断登补登",
                     format!(
                         "另有 {} 天可补、剩 {remaining} 张卡，下轮继续",
-                        candidates.len() - used
+                        candidates.len() - used_count
                     ),
                 );
             }
@@ -147,7 +152,7 @@ impl GrowthRun<'_> {
         let summary = match self.get_json("/redeem/summary").await {
             Ok(summary) => summary,
             Err(failure) => {
-                self.note_call_failure("redeem", "连登兑换", "查询连登兑换", failure);
+                self.note_call_failure("redeem", "连登兑换", "查询连登兑换", &failure);
                 return;
             }
         };
@@ -220,7 +225,7 @@ impl GrowthRun<'_> {
                     );
                 }
                 Err(failure) => {
-                    self.note_call_failure("redeem", "连登兑换", "连登兑换", failure);
+                    self.note_call_failure("redeem", "连登兑换", "连登兑换", &failure);
                 }
             }
         }
@@ -278,9 +283,9 @@ fn makeup_cards(body: &Value) -> u32 {
 pub(super) fn makeup_candidates(streak: &Value, heatmap: &Value) -> Result<Vec<String>, String> {
     let today =
         parse_date(text_of(dig(heatmap, "today").and_then(|today| dig(today, "date"))).as_deref())
-            .map_err(|_| "活跃日历缺少服务端日期".to_owned())?;
+            .map_err(|()| "活跃日历缺少服务端日期".to_owned())?;
     let launch = parse_date(text_of(dig(streak, "launch_date")).as_deref())
-        .map_err(|_| "连登状态缺少活动上线日期".to_owned())?;
+        .map_err(|()| "连登状态缺少活动上线日期".to_owned())?;
     let floor = parse_date(Some(ACTIVITY_FLOOR)).expect("活动起始日应为合法日期");
     let start = today
         .with_day(1)
@@ -298,7 +303,7 @@ pub(super) fn makeup_candidates(streak: &Value, heatmap: &Value) -> Result<Vec<S
                 .collect::<Result<HashSet<_>, _>>()
         })
         .transpose()
-        .map_err(|_| "已补登记录格式无效".to_owned())?
+        .map_err(|()| "已补登记录格式无效".to_owned())?
         .unwrap_or_default();
 
     let cells = dig(heatmap, "cells")
@@ -307,16 +312,20 @@ pub(super) fn makeup_candidates(streak: &Value, heatmap: &Value) -> Result<Vec<S
     let mut scores: BTreeMap<NaiveDate, f64> = BTreeMap::new();
     for cell in cells {
         let day = parse_date(cell.get("date").and_then(Value::as_str))
-            .map_err(|_| "活跃日历记录格式无效".to_owned())?;
+            .map_err(|()| "活跃日历记录格式无效".to_owned())?;
         let score = cell
             .get("score")
             .and_then(Value::as_f64)
             .filter(|score| score.is_finite() && *score >= 0.0)
             .ok_or_else(|| "活跃日历分数无效".to_owned())?;
-        if scores
+        #[allow(
+            clippy::float_cmp,
+            reason = "同一日期出现两条记录要逐位比较，容忍误差会把真实冲突当成重复"
+        )]
+        let conflicted = scores
             .insert(day, score)
-            .is_some_and(|previous| previous != score)
-        {
+            .is_some_and(|previous| previous != score);
+        if conflicted {
             return Err("活跃日历同一日期的记录冲突".to_owned());
         }
     }

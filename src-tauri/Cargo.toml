@@ -5,6 +5,14 @@ description = "WorkBuddy multi-account credit and daily check-in assistant"
 edition = "2024"
 rust-version = "1.95"
 
+[lints.rust]
+unsafe_code = "forbid"
+
+# 与 CI 的 `cargo clippy --all-targets -- -D warnings` 叠加，把 pedantic 作为长期基线；
+# 个别确有必要放宽的地方用带 reason 的 #[allow] 就地说明。
+[lints.clippy]
+pedantic = "warn"
+
 [lib]
 name = "workbuddy_assistant_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

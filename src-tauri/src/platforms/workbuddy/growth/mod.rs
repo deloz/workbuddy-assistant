@@ -8,6 +8,7 @@ mod streak;
 mod tasks;
 mod travel;
 
+use std::fmt::Write as _;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -24,7 +25,7 @@ use super::signin::random_hex;
 /// 成长中心接口前缀。
 const GROWTH_PATH: &str = "/v2/activity/growth";
 /// 单账号一轮的总时间预算：网络异常时避免一次自动运行被拖穿。
-const RUN_BUDGET: Duration = Duration::from_secs(240);
+const RUN_BUDGET: Duration = Duration::from_mins(4);
 /// 只读请求在超时或 5xx 之后的退避间隔；写操作一律不重试。
 const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(3), Duration::from_secs(10)];
 /// 接单接口的批量上限。
@@ -254,9 +255,9 @@ impl GrowthRun<'_> {
         id: &'static str,
         label: &'static str,
         action: &str,
-        failure: CallFailure,
+        failure: &CallFailure,
     ) {
-        if self.handle_auth(&failure) {
+        if self.handle_auth(failure) {
             return;
         }
         let detail = format!("{action}失败：{}", failure.describe());
@@ -323,7 +324,7 @@ impl GrowthRun<'_> {
     }
 
     fn into_snapshot(mut self, trigger: &str) -> GrowthSnapshot {
-        self.overview.energy = self.energy.clone();
+        self.overview.energy.clone_from(&self.energy);
         self.overview.streak_days = self.streak_days;
         let report = self.build_report();
         GrowthSnapshot {
@@ -366,7 +367,7 @@ impl GrowthRun<'_> {
 
         let mut report = parts.join("；");
         if !tail.is_empty() {
-            report.push_str(&format!("（{}）", tail.join("，")));
+            let _ = write!(report, "（{}）", tail.join("，"));
         }
         report
     }
@@ -474,6 +475,10 @@ fn number_of(value: Option<&Value>) -> Option<f64> {
 }
 
 /// 用服务端时间戳算「还有多久回来」；任一缺失或非法时返回空串。
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "已排除非有限值与非正数，取整只用于展示分钟数，不会溢出 i64"
+)]
 fn travel_eta(arrive_at: Option<&Value>, server_now: Option<&Value>) -> String {
     let (Some(arrive_at), Some(server_now)) = (number_of(arrive_at), number_of(server_now)) else {
         return String::new();

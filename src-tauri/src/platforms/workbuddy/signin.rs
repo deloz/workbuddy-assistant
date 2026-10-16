@@ -10,11 +10,11 @@ use super::auth::unix_now_ms;
 use super::session::API_BASE_URL;
 use crate::data::workbuddy_signin::StoredIdentity;
 
-/// WorkBuddy 客户端身份。登录页的主机由它决定（`WorkBuddy/*` 才返回桌面端那个登录页）。
+/// `WorkBuddy` 客户端身份。登录页的主机由它决定（`WorkBuddy/*` 才返回桌面端那个登录页）。
 const SIGNIN_USER_AGENT: &str = "WorkBuddy/5.5.6";
 const PLATFORM: &str = "workbuddy";
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
-const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
+const LOGIN_TIMEOUT: Duration = Duration::from_mins(5);
 /// 「还在登录中」的应答码：token 与账号各一个。
 const TOKEN_PENDING_CODE: i32 = 11217;
 const ACCOUNT_PENDING_CODE: i32 = 12151;
@@ -247,7 +247,7 @@ pub(crate) async fn refresh(
     Ok(data.into_tokens())
 }
 
-/// 该账号在 WorkBuddy 上的全部身份；接口不可用时返回空列表，由调用方退化为单身份。
+/// 该账号在 `WorkBuddy` 上的全部身份；接口不可用时返回空列表，由调用方退化为单身份。
 pub(crate) async fn fetch_identities(
     client: &Client,
     access_token: &str,
@@ -397,7 +397,7 @@ where
         }
         return PollOutcome::Fatal(format!(
             "WorkBuddy 登录失败（{}）",
-            message_of(&envelope.msg, code)
+            message_of(envelope.msg.as_deref(), code)
         ));
     }
 
@@ -430,7 +430,7 @@ fn ensure_success<T>(status: StatusCode, envelope: &Envelope<T>) -> Result<(), S
     if let Some(code) = envelope.code.filter(|code| *code != 0) {
         return Err(format!(
             "WorkBuddy 登录失败（{}）",
-            message_of(&envelope.msg, code)
+            message_of(envelope.msg.as_deref(), code)
         ));
     }
     Ok(())
@@ -443,8 +443,8 @@ fn code_suffix<T>(envelope: &Envelope<T>) -> String {
     }
 }
 
-fn message_of(msg: &Option<String>, code: i32) -> String {
-    text(msg.as_deref()).unwrap_or_else(|| format!("code {code}"))
+fn message_of(msg: Option<&str>, code: i32) -> String {
+    text(msg).unwrap_or_else(|| format!("code {code}"))
 }
 
 /// X-Domain 取凭据带回的域名，没有就用服务主机名（与插件一致）。
@@ -517,13 +517,14 @@ fn text(value: Option<&str>) -> Option<String> {
 /// 32 位十六进制会话标识。不引入随机数依赖：`RandomState` 的哈希密钥来自操作系统的随机源。
 pub(crate) fn random_hex(length: usize) -> String {
     use std::collections::hash_map::RandomState;
+    use std::fmt::Write as _;
     use std::hash::{BuildHasher, Hasher};
 
     let mut value = String::with_capacity(length);
     while value.len() < length {
         let mut hasher = RandomState::new().build_hasher();
         hasher.write_i64(unix_now_ms());
-        value.push_str(&format!("{:016x}", hasher.finish()));
+        let _ = write!(value, "{:016x}", hasher.finish());
     }
     value.truncate(length);
     value

@@ -14,7 +14,7 @@ impl GrowthRun<'_> {
         let body = match self.get_json("/tasks").await {
             Ok(body) => body,
             Err(failure) => {
-                self.note_call_failure("tasks", "每日任务", "查询任务列表", failure);
+                self.note_call_failure("tasks", "每日任务", "查询任务列表", &failure);
                 return;
             }
         };
@@ -64,7 +64,7 @@ impl GrowthRun<'_> {
             match self.post_json("/tasks/accept", payload).await {
                 Ok(body) => self.note_accept_results(tasks, batch, &body),
                 Err(failure) => {
-                    self.note_call_failure("tasks", "每日任务", "领取任务", failure);
+                    self.note_call_failure("tasks", "每日任务", "领取任务", &failure);
                     return;
                 }
             }
@@ -79,8 +79,7 @@ impl GrowthRun<'_> {
                     let code = text_of(result.get("task_code"));
                     let title = code
                         .as_deref()
-                        .map(|code| task_title(tasks, code))
-                        .unwrap_or_else(|| "未知任务".to_owned());
+                        .map_or_else(|| "未知任务".to_owned(), |code| task_title(tasks, code));
                     if text_of(result.get("status")).as_deref() == Some("error") {
                         let detail = text_of(result.get("message"))
                             .unwrap_or_else(|| "服务端未说明原因".to_owned());
@@ -172,7 +171,7 @@ impl GrowthRun<'_> {
                     );
                 }
                 Err(failure) => {
-                    self.note_call_failure("tasks", "每日任务", "领取任务奖", failure);
+                    self.note_call_failure("tasks", "每日任务", "领取任务奖", &failure);
                     return;
                 }
             }
@@ -181,13 +180,14 @@ impl GrowthRun<'_> {
 }
 
 fn count_status(tasks: &[Value], status: &str) -> u32 {
-    tasks
+    let count = tasks
         .iter()
         .filter(|task| {
             !task.get("locked").and_then(Value::as_bool).unwrap_or(false)
                 && text_of(task.get("accept_status")).as_deref() == Some(status)
         })
-        .count() as u32
+        .count();
+    u32::try_from(count).unwrap_or(u32::MAX)
 }
 
 fn task_title(tasks: &[Value], code: &str) -> String {

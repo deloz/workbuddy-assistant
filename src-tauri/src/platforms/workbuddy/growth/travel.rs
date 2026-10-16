@@ -3,6 +3,10 @@
 use super::{GrowthRun, dig, text_of, travel_eta, u32_of};
 
 impl GrowthRun<'_> {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "状态机按「领取→查询地点→派出」顺序展开，拆开反而丢失上下文"
+    )]
     pub(super) async fn run_travel(&mut self) {
         if !self.budget_left() {
             self.note_skipped("travel", "Buddy 旅行", "时间预算耗尽，旅行模块跳过");
@@ -12,7 +16,7 @@ impl GrowthRun<'_> {
         let status = match self.get_json("/buddy/travel/status").await {
             Ok(status) => status,
             Err(failure) => {
-                self.note_call_failure("travel", "Buddy 旅行", "查询旅行状态", failure);
+                self.note_call_failure("travel", "Buddy 旅行", "查询旅行状态", &failure);
                 return;
             }
         };
@@ -20,8 +24,8 @@ impl GrowthRun<'_> {
         let state = text_of(dig(&status, "state"));
         let daily_limit = super::bool_of(dig(&status, "daily_limit_reached"));
         let location = dig(&status, "location").and_then(|location| text_of(dig(location, "name")));
-        self.overview.travel_state = state.clone();
-        self.overview.travel_location = location.clone();
+        self.overview.travel_state.clone_from(&state);
+        self.overview.travel_location.clone_from(&location);
         self.overview.travel_daily_limit_reached = daily_limit;
 
         if state.as_deref() == Some("traveling") {
@@ -63,7 +67,7 @@ impl GrowthRun<'_> {
                     return;
                 }
                 Err(failure) => {
-                    self.note_call_failure("travel", "Buddy 旅行", "领取旅行礼物", failure);
+                    self.note_call_failure("travel", "Buddy 旅行", "领取旅行礼物", &failure);
                     return;
                 }
             }
@@ -81,7 +85,7 @@ impl GrowthRun<'_> {
         let config = match self.get_json("/buddy/travel/config").await {
             Ok(config) => config,
             Err(failure) => {
-                self.note_call_failure("travel", "Buddy 旅行", "查询旅行地点", failure);
+                self.note_call_failure("travel", "Buddy 旅行", "查询旅行地点", &failure);
                 return;
             }
         };
@@ -110,7 +114,7 @@ impl GrowthRun<'_> {
                 );
             }
             Err(failure) => {
-                self.note_call_failure("travel", "Buddy 旅行", "派出 Buddy", failure);
+                self.note_call_failure("travel", "Buddy 旅行", "派出 Buddy", &failure);
             }
         }
     }
