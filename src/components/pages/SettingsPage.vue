@@ -81,6 +81,36 @@
       </p>
     </section>
 
+    <section class="settings-section" aria-labelledby="automation-title">
+      <h2 id="automation-title">自动化</h2>
+      <div class="about-list">
+        <div class="about-row">
+          <dt>成长中心</dt>
+          <dd>
+            <button
+              class="button button--secondary settings-link"
+              type="button"
+              :disabled="store.savingGrowthAutomation"
+              :aria-pressed="store.growthAutomationEnabled"
+              @click="store.toggleGrowthAutomation"
+            >
+              {{ store.growthAutomationEnabled ? "已开启，点击关闭" : "已关闭，点击开启" }}
+            </button>
+            <p class="settings-message settings-message--neutral">
+              开启后，应用运行期间会在每天 00:00 与每 4 小时自动领取旅行礼物、任务奖励、补登与盲盒；关闭后仅保留自动签到。
+            </p>
+            <p
+              v-if="settingsError"
+              class="settings-message settings-message--error"
+              role="status"
+            >
+              {{ settingsError }}
+            </p>
+          </dd>
+        </div>
+      </div>
+    </section>
+
     <section class="settings-section" aria-labelledby="about-title">
       <h2 id="about-title">关于</h2>
       <dl class="about-list">
@@ -178,8 +208,10 @@ const updateMessageTone = computed(() =>
     result: store.updateResult,
   }),
 );
+const settingsError = computed(() => store.settingsError);
 
 onMounted(() => {
   store.initialize();
+  store.loadAppSettings();
 });
 </script>

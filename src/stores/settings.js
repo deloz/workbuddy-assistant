@@ -23,6 +23,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const linkError = ref(null);
   const updateGuideOpen = ref(false);
   const updateNoticeDismissed = ref(false);
+  const growthAutomationEnabled = ref(true);
+  const settingsLoaded = ref(false);
+  const savingGrowthAutomation = ref(false);
+  const settingsError = ref(null);
 
   const actionableUpdate = computed(() => isActionableUpdate(updateResult.value));
   const updateNoticeVisible = computed(
@@ -46,6 +50,39 @@ export const useSettingsStore = defineStore("settings", () => {
     } finally {
       loading.value = false;
     }
+  }
+
+  async function loadAppSettings() {
+    try {
+      const settings = await invoke("get_app_settings");
+      growthAutomationEnabled.value = settings?.growthAutomationEnabled !== false;
+      settingsLoaded.value = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function setGrowthAutomation(enabled) {
+    if (savingGrowthAutomation.value) {
+      return false;
+    }
+    savingGrowthAutomation.value = true;
+    settingsError.value = null;
+    try {
+      const settings = await invoke("set_growth_automation_enabled", { enabled });
+      growthAutomationEnabled.value = settings?.growthAutomationEnabled !== false;
+      return true;
+    } catch (reason) {
+      settingsError.value = normalizeError(reason);
+      return false;
+    } finally {
+      savingGrowthAutomation.value = false;
+    }
+  }
+
+  async function toggleGrowthAutomation() {
+    return setGrowthAutomation(!growthAutomationEnabled.value);
   }
 
   async function checkForUpdates() {
@@ -109,7 +146,14 @@ export const useSettingsStore = defineStore("settings", () => {
     updateGuideOpen,
     updateNoticeVisible,
     version,
+    growthAutomationEnabled,
+    settingsLoaded,
+    savingGrowthAutomation,
+    settingsError,
     initialize,
+    loadAppSettings,
+    setGrowthAutomation,
+    toggleGrowthAutomation,
     checkForUpdates,
     openExternalLink,
     openUpdateGuide,
