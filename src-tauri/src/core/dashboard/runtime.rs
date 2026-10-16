@@ -229,14 +229,21 @@ impl DashboardRuntime {
         state.accounts.clear();
     }
 
-    pub async fn set_scheduler(&self, running: bool, next_at: Option<String>) {
+    /// 返回计划时间是否变化；调度循环据此决定要不要广播快照。
+    pub async fn set_scheduler(&self, running: bool, next_at: Option<String>) -> bool {
         let mut state = self.state.write().await;
+        let changed = state.scheduler_running != running || state.next_auto_checkin_at != next_at;
         state.scheduler_running = running;
         state.next_auto_checkin_at = next_at;
+        changed
     }
 
-    pub async fn set_next_growth_run(&self, next_at: Option<String>) {
-        self.state.write().await.next_growth_run_at = next_at;
+    /// 同上：只有计划时间真的变了才需要通知前端重绘。
+    pub async fn set_next_growth_run(&self, next_at: Option<String>) -> bool {
+        let mut state = self.state.write().await;
+        let changed = state.next_growth_run_at != next_at;
+        state.next_growth_run_at = next_at;
+        changed
     }
 
     /// 最近一次自动批次（签到 + 成长）的时间；轮询以它为基准计时。

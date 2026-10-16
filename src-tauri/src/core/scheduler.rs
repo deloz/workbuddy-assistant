@@ -17,18 +17,23 @@ pub(crate) fn start(app: AppHandle) {
 
 async fn run(app: AppHandle) {
     let runtime = app.state::<DashboardRuntime>();
+    // 启动时先广播一次：调度计划只有写进快照，前端才看得到。
     runtime.set_scheduler(true, None).await;
+    runtime.emit(&app).await;
     run_automatic_batch(&app, runtime.inner()).await;
 
     loop {
         let now = chrono::Local::now();
         let next = dashboard::next_local_midnight(now);
-        runtime.set_scheduler(true, Some(next.to_rfc3339())).await;
-        runtime
+        let schedule_changed = runtime.set_scheduler(true, Some(next.to_rfc3339())).await;
+        let growth_changed = runtime
             .set_next_growth_run(Some(
                 next_growth_run_at(runtime.inner(), now).await.to_rfc3339(),
             ))
             .await;
+        if schedule_changed || growth_changed {
+            runtime.emit(&app).await;
+        }
 
         let until_midnight = (next - now)
             .to_std()
