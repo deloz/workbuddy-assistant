@@ -15,6 +15,7 @@ export function createEmptyDashboardSnapshot() {
     currentAccountId: null,
     accounts: [],
     nextAutoCheckinAt: null,
+    nextGrowthRunAt: null,
     schedulerRunning: false,
   };
 }
@@ -56,6 +57,38 @@ export function accountStatusLabel(account) {
     return "需重新登录";
   }
   return accountTypeLabel(account?.accountType);
+}
+
+export function growthTriggerLabel(trigger) {
+  switch (trigger) {
+    case "daily":
+      return "每日自动";
+    case "poll":
+      return "定时轮询";
+    default:
+      return "手动运行";
+  }
+}
+
+export function growthStepTone(status) {
+  switch (status) {
+    case "ok":
+      return "ok";
+    case "failed":
+      return "danger";
+    case "skipped":
+      return "warn";
+    default:
+      return "muted";
+  }
+}
+
+export function formatGrowthCredits(value) {
+  const text = String(value ?? "").trim();
+  if (!text || Number(text) === 0) {
+    return "—";
+  }
+  return `+${text}`;
 }
 
 export function formatUpdateMessage({ checking, error, result }) {

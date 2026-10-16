@@ -89,6 +89,32 @@
   .checkin-task__stats > div:last-child {
     border-bottom: 0;
   }
+
+  .growth-overview__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .growth-overview__grid > div:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .growth-overview__grid > div:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .growth-overview__redeem {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .growth-steps__list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .growth-step__detail {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 560px) {
@@ -115,6 +141,22 @@
 
   .account-list__actions {
     grid-column: 1;
+  }
+
+  .growth-overview__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .growth-overview__grid > div:nth-child(3n) {
+    border-right: 1px solid var(--rule);
+  }
+
+  .growth-overview__grid > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .growth-overview__grid > div:nth-child(-n + 4) {
+    border-bottom: 1px solid var(--rule);
   }
 }
 

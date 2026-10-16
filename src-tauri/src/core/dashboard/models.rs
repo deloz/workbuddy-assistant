@@ -2,8 +2,10 @@ use chrono::Local;
 use serde::Serialize;
 
 use crate::data::checkin_history::CheckinHistoryEntry;
+use crate::data::growth_history::GrowthHistoryEntry;
 use crate::platforms::workbuddy::checkin::CheckinSnapshot;
 use crate::platforms::workbuddy::credit::CreditSnapshot;
+use crate::platforms::workbuddy::growth::GrowthSnapshot;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +29,16 @@ pub struct AccountCheckinState {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AccountGrowthState {
+    pub account_id: String,
+    pub status: String,
+    pub data: Option<GrowthSnapshot>,
+    pub error: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountView {
     pub account_id: String,
     pub nickname: String,
@@ -36,7 +48,9 @@ pub struct AccountView {
     pub needs_signin: bool,
     pub credit: AccountCreditState,
     pub checkin: AccountCheckinState,
+    pub growth: AccountGrowthState,
     pub checkin_history: Vec<CheckinHistoryEntry>,
+    pub growth_history: Vec<GrowthHistoryEntry>,
 }
 
 #[derive(Clone, Serialize)]
@@ -54,6 +68,7 @@ pub struct DashboardSnapshot {
     pub current_account_id: Option<String>,
     pub accounts: Vec<AccountView>,
     pub next_auto_checkin_at: Option<String>,
+    pub next_growth_run_at: Option<String>,
     pub scheduler_running: bool,
 }
 
@@ -84,6 +99,29 @@ pub struct CheckinBatchSnapshot {
     pub accounts: Vec<CheckinAccountSnapshot>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountGrowthSnapshot {
+    pub account_id: String,
+    pub status: String,
+    pub data: Option<GrowthSnapshot>,
+    pub error: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrowthBatchSnapshot {
+    pub completed_at: String,
+    pub accounts: Vec<AccountGrowthSnapshot>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingsView {
+    pub growth_automation_enabled: bool,
+}
+
 impl AccountCreditState {
     pub(super) fn idle(account_id: &str) -> Self {
         Self {
@@ -101,6 +139,18 @@ impl AccountCheckinState {
         Self {
             account_id: account_id.to_owned(),
             status: "waiting".to_owned(),
+            data: None,
+            error: None,
+            updated_at: None,
+        }
+    }
+}
+
+impl AccountGrowthState {
+    pub(super) fn idle(account_id: &str) -> Self {
+        Self {
+            account_id: account_id.to_owned(),
+            status: "idle".to_owned(),
             data: None,
             error: None,
             updated_at: None,
@@ -132,6 +182,28 @@ impl AccountCreditSnapshot {
 
 impl CheckinAccountSnapshot {
     pub(super) fn from_state(state: &AccountCheckinState) -> Self {
+        Self {
+            account_id: state.account_id.clone(),
+            status: state.status.clone(),
+            data: state.data.clone(),
+            error: state.error.clone(),
+            updated_at: state.updated_at.clone(),
+        }
+    }
+
+    pub(super) fn error(account_id: &str, message: &str) -> Self {
+        Self {
+            account_id: account_id.to_owned(),
+            status: "error".to_owned(),
+            data: None,
+            error: Some(message.to_owned()),
+            updated_at: Some(Local::now().to_rfc3339()),
+        }
+    }
+}
+
+impl AccountGrowthSnapshot {
+    pub(super) fn from_state(state: &AccountGrowthState) -> Self {
         Self {
             account_id: state.account_id.clone(),
             status: state.status.clone(),

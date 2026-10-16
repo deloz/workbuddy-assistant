@@ -18,6 +18,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
   const loading = ref(false);
   const refreshingAccountId = ref(null);
   const checkinInvoking = ref(false);
+  const growthInvoking = ref(false);
   const error = ref(null);
   const revealedAccountIds = ref({});
   const signinState = ref("idle");
@@ -36,8 +37,17 @@ export const useDashboardStore = defineStore("dashboard", () => {
       checkinInvoking.value ||
       accounts.value.some((account) => account.checkin?.status === "loading"),
   );
+  const growthLoading = computed(
+    () =>
+      growthInvoking.value ||
+      accounts.value.some((account) => account.growth?.status === "running"),
+  );
   const busy = computed(
-    () => loading.value || refreshingAccountId.value !== null || checkinLoading.value,
+    () =>
+      loading.value ||
+      refreshingAccountId.value !== null ||
+      checkinLoading.value ||
+      growthLoading.value,
   );
   const signinBusy = computed(() => isSigninBusy(signinState.value));
   const signinStatus = computed(() => formatSigninStatus(signinState.value));
@@ -165,6 +175,40 @@ export const useDashboardStore = defineStore("dashboard", () => {
     }
   }
 
+  async function runGrowthCurrent(accountId = currentAccount.value?.accountId) {
+    if (!accountId || growthLoading.value) {
+      return false;
+    }
+    growthInvoking.value = true;
+    error.value = null;
+    try {
+      await invoke("run_growth_account", { accountId });
+      return true;
+    } catch (reason) {
+      error.value = normalizeError(reason);
+      return false;
+    } finally {
+      growthInvoking.value = false;
+    }
+  }
+
+  async function runGrowthAll() {
+    if (growthLoading.value) {
+      return false;
+    }
+    growthInvoking.value = true;
+    error.value = null;
+    try {
+      await invoke("run_growth_all");
+      return true;
+    } catch (reason) {
+      error.value = normalizeError(reason);
+      return false;
+    } finally {
+      growthInvoking.value = false;
+    }
+  }
+
   async function revealAccountIdentifier(accountId) {
     if (revealedAccountIds.value[accountId]) {
       const next = { ...revealedAccountIds.value };
@@ -255,6 +299,7 @@ export const useDashboardStore = defineStore("dashboard", () => {
     loading,
     refreshingAccountId,
     checkinLoading,
+    growthLoading,
     busy,
     signinBusy,
     signinState,
@@ -267,6 +312,8 @@ export const useDashboardStore = defineStore("dashboard", () => {
     selectAccount,
     refreshAccountCredit,
     runCheckinCurrent,
+    runGrowthCurrent,
+    runGrowthAll,
     revealAccountIdentifier,
     beginSignin,
     completeSignin,

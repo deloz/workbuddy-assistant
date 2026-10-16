@@ -7,15 +7,18 @@ use tokio::sync::{Mutex, RwLock};
 
 use super::STATE_CHANGED_EVENT;
 use super::models::{
-    AccountCheckinState, AccountCreditSnapshot, AccountCreditState, AccountView,
-    CheckinAccountSnapshot, DashboardSnapshot,
+    AccountCheckinState, AccountCreditSnapshot, AccountCreditState, AccountGrowthSnapshot,
+    AccountGrowthState, AccountView, AppSettingsView, CheckinAccountSnapshot, DashboardSnapshot,
 };
 use crate::data::checkin_history::{
     CheckinHistoryEntry, CheckinHistoryOutcome, CheckinHistoryStore,
 };
+use crate::data::growth_history::{GrowthHistoryEntry, GrowthHistoryStore};
+use crate::data::settings::{AppSettings, SettingsStore};
 use crate::platforms::workbuddy::auth::{AccountDescriptor, AuthBundle};
 use crate::platforms::workbuddy::checkin::CheckinSnapshot;
 use crate::platforms::workbuddy::credit::CreditSnapshot;
+use crate::platforms::workbuddy::growth::GrowthSnapshot;
 
 /// 等待用户在浏览器里完成的一次登录。
 #[derive(Clone)]
@@ -36,6 +39,7 @@ struct AccountCache {
     descriptor: AccountDescriptor,
     credit: AccountCreditState,
     checkin: AccountCheckinState,
+    growth: AccountGrowthState,
 }
 
 #[derive(Default)]
@@ -45,34 +49,50 @@ struct RuntimeState {
     current_account_id: Option<String>,
     accounts: Vec<AccountCache>,
     next_auto_checkin_at: Option<String>,
+    next_growth_run_at: Option<String>,
+    last_batch_at: Option<String>,
     scheduler_running: bool,
     last_auto_checkin_date: Option<NaiveDate>,
     checkin_history: CheckinHistoryStore,
+    growth_history: GrowthHistoryStore,
 }
 
 pub struct DashboardRuntime {
     state: RwLock<RuntimeState>,
     pub(super) operation_lock: Mutex<()>,
     signin_path: PathBuf,
+    settings: Mutex<SettingsStore>,
     pending_signin: Mutex<Option<PendingSignin>>,
     exiting: AtomicBool,
 }
 
 impl Default for DashboardRuntime {
     fn default() -> Self {
-        Self::with_paths(PathBuf::new(), PathBuf::new())
+        Self::with_paths(
+            PathBuf::new(),
+            PathBuf::new(),
+            PathBuf::new(),
+            PathBuf::new(),
+        )
     }
 }
 
 impl DashboardRuntime {
-    pub fn with_paths(history_path: PathBuf, signin_path: PathBuf) -> Self {
+    pub fn with_paths(
+        history_path: PathBuf,
+        growth_history_path: PathBuf,
+        settings_path: PathBuf,
+        signin_path: PathBuf,
+    ) -> Self {
         Self {
             state: RwLock::new(RuntimeState {
                 checkin_history: CheckinHistoryStore::load(history_path),
+                growth_history: GrowthHistoryStore::load(growth_history_path),
                 ..RuntimeState::default()
             }),
             operation_lock: Mutex::new(()),
             signin_path,
+            settings: Mutex::new(SettingsStore::load(settings_path)),
             pending_signin: Mutex::new(None),
             exiting: AtomicBool::new(false),
         }
@@ -80,6 +100,29 @@ impl DashboardRuntime {
 
     pub(crate) fn signin_path(&self) -> &Path {
         &self.signin_path
+    }
+
+    pub(crate) async fn app_settings(&self) -> AppSettings {
+        self.settings.lock().await.settings().clone()
+    }
+
+    pub(crate) async fn settings_view(&self) -> AppSettingsView {
+        AppSettingsView {
+            growth_automation_enabled: self.app_settings().await.growth_automation_enabled,
+        }
+    }
+
+    pub(crate) async fn set_growth_automation_enabled(
+        &self,
+        enabled: bool,
+    ) -> Result<AppSettingsView, String> {
+        let mut settings = self.settings.lock().await;
+        settings
+            .set_growth_automation_enabled(enabled)
+            .map_err(|_| "无法保存设置，请检查磁盘权限后重试".to_owned())?;
+        Ok(AppSettingsView {
+            growth_automation_enabled: enabled,
+        })
     }
 
     /// 尚未超时的待完成登录；超时即视为没有。
@@ -123,12 +166,17 @@ impl DashboardRuntime {
                     needs_signin: account.descriptor.needs_signin,
                     credit: account.credit.clone(),
                     checkin: account.checkin.clone(),
+                    growth: account.growth.clone(),
                     checkin_history: state
                         .checkin_history
+                        .entries_for(&account.descriptor.account_id),
+                    growth_history: state
+                        .growth_history
                         .entries_for(&account.descriptor.account_id),
                 })
                 .collect(),
             next_auto_checkin_at: state.next_auto_checkin_at.clone(),
+            next_growth_run_at: state.next_growth_run_at.clone(),
             scheduler_running: state.scheduler_running,
         }
     }
@@ -161,6 +209,10 @@ impl DashboardRuntime {
                         || AccountCheckinState::idle(&descriptor.account_id),
                         |old| old.checkin.clone(),
                     ),
+                    growth: cached.map_or_else(
+                        || AccountGrowthState::idle(&descriptor.account_id),
+                        |old| old.growth.clone(),
+                    ),
                 }
             })
             .collect();
@@ -181,6 +233,23 @@ impl DashboardRuntime {
         let mut state = self.state.write().await;
         state.scheduler_running = running;
         state.next_auto_checkin_at = next_at;
+    }
+
+    pub async fn set_next_growth_run(&self, next_at: Option<String>) {
+        self.state.write().await.next_growth_run_at = next_at;
+    }
+
+    /// 最近一次自动批次（签到 + 成长）的时间；轮询以它为基准计时。
+    pub async fn last_batch_at(&self) -> Option<String> {
+        self.state.read().await.last_batch_at.clone()
+    }
+
+    pub async fn is_logged_in(&self) -> bool {
+        self.state.read().await.logged_in
+    }
+
+    pub async fn mark_batch_ran(&self, at: String) {
+        self.state.write().await.last_batch_at = Some(at);
     }
 
     pub async fn mark_auto_date_if_needed(&self, date: NaiveDate) -> bool {
@@ -305,6 +374,88 @@ impl DashboardRuntime {
         snapshot
     }
 
+    pub(super) async fn set_growth_running(&self, account_id: &str) {
+        let mut state = self.state.write().await;
+        if let Some(account) = state
+            .accounts
+            .iter_mut()
+            .find(|account| account.descriptor.account_id == account_id)
+        {
+            account.growth.status = "running".to_owned();
+            account.growth.error = None;
+        }
+    }
+
+    pub(super) async fn set_growth_result(
+        &self,
+        account_id: &str,
+        trigger: &str,
+        result: Result<GrowthSnapshot, String>,
+    ) -> AccountGrowthSnapshot {
+        let mut state = self.state.write().await;
+        let Some(account) = state
+            .accounts
+            .iter_mut()
+            .find(|account| account.descriptor.account_id == account_id)
+        else {
+            return AccountGrowthSnapshot::error(account_id, "未找到该账号，请重新检测登录信息");
+        };
+
+        let updated_at = Local::now().to_rfc3339();
+        let (snapshot, history) = match result {
+            Ok(snapshot) => {
+                let history = crate::data::growth_history::should_record(
+                    &snapshot.trigger,
+                    &snapshot.credits_gained,
+                    snapshot.needs_attention,
+                )
+                .then(|| GrowthHistoryEntry {
+                    local_date: Local::now().date_naive().to_string(),
+                    ran_at: snapshot.ran_at.clone(),
+                    trigger: snapshot.trigger.clone(),
+                    status: growth_state_label(&snapshot),
+                    report: snapshot.report.clone(),
+                    credits_gained: snapshot.credits_gained.clone(),
+                    energy: snapshot.energy.clone(),
+                    needs_attention: snapshot.needs_attention,
+                    error: None,
+                });
+                account.growth.status = "ready".to_owned();
+                account.growth.data = Some(snapshot);
+                account.growth.error = None;
+                account.growth.updated_at = Some(updated_at);
+                (AccountGrowthSnapshot::from_state(&account.growth), history)
+            }
+            Err(error) => {
+                let history = GrowthHistoryEntry {
+                    local_date: Local::now().date_naive().to_string(),
+                    ran_at: updated_at.clone(),
+                    trigger: trigger.to_owned(),
+                    status: "error".to_owned(),
+                    report: error.clone(),
+                    credits_gained: "0".to_owned(),
+                    energy: None,
+                    needs_attention: true,
+                    error: Some(error.clone()),
+                };
+                account.growth.status = "error".to_owned();
+                account.growth.error = Some(error);
+                account.growth.updated_at = Some(updated_at);
+                (
+                    AccountGrowthSnapshot::from_state(&account.growth),
+                    Some(history),
+                )
+            }
+        };
+
+        if let Some(history) = history
+            && let Err(error) = state.growth_history.record(account_id, history)
+        {
+            eprintln!("无法保存成长中心历史：{error}");
+        }
+        snapshot
+    }
+
     pub(super) async fn account_descriptors(&self) -> Vec<AccountDescriptor> {
         self.state
             .read()
@@ -323,6 +474,19 @@ impl DashboardRuntime {
 
 pub(crate) fn local_today() -> NaiveDate {
     Local::now().date_naive()
+}
+
+/// 历史条目里的状态标签：优先反映「有东西可领」与「需要关注」。
+fn growth_state_label(snapshot: &GrowthSnapshot) -> String {
+    if snapshot.needs_attention {
+        "needsAttention".to_owned()
+    } else if snapshot.credits_gained.trim() != "0" {
+        "claimed".to_owned()
+    } else if snapshot.idle {
+        "idle".to_owned()
+    } else {
+        "checked".to_owned()
+    }
 }
 
 fn should_run_automatic(last_run: Option<NaiveDate>, today: NaiveDate) -> bool {

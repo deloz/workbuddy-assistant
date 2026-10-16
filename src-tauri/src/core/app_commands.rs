@@ -1,8 +1,9 @@
 use tauri::State;
 
 use super::dashboard::{
-    self, AccountCreditSnapshot, CheckinAccountSnapshot, CheckinBatchSnapshot, DashboardRuntime,
-    DashboardSnapshot, SigninStartView,
+    self, AccountCreditSnapshot, AccountGrowthSnapshot, AppSettingsView, CheckinAccountSnapshot,
+    CheckinBatchSnapshot, DashboardRuntime, DashboardSnapshot, GrowthBatchSnapshot,
+    SigninStartView,
 };
 use super::update::{self, UpdateCheckSnapshot};
 
@@ -77,6 +78,38 @@ pub(crate) async fn run_checkin_account(
     account_id: String,
 ) -> Result<CheckinAccountSnapshot, String> {
     dashboard::run_checkin_account(state.inner(), &app, &account_id).await
+}
+
+#[tauri::command(rename = "run_growth_all")]
+pub(crate) async fn run_growth_all_command(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+) -> Result<GrowthBatchSnapshot, String> {
+    dashboard::run_growth_all(state.inner(), &app, "manual").await
+}
+
+#[tauri::command]
+pub(crate) async fn run_growth_account(
+    app: tauri::AppHandle,
+    state: State<'_, DashboardRuntime>,
+    account_id: String,
+) -> Result<AccountGrowthSnapshot, String> {
+    dashboard::run_growth_account(state.inner(), &app, &account_id).await
+}
+
+#[tauri::command]
+pub(crate) async fn get_app_settings(
+    state: State<'_, DashboardRuntime>,
+) -> Result<AppSettingsView, String> {
+    Ok(state.settings_view().await)
+}
+
+#[tauri::command]
+pub(crate) async fn set_growth_automation_enabled(
+    state: State<'_, DashboardRuntime>,
+    enabled: bool,
+) -> Result<AppSettingsView, String> {
+    state.set_growth_automation_enabled(enabled).await
 }
 
 #[tauri::command]

@@ -5,9 +5,12 @@ import {
   accountStatusLabel,
   accountTypeLabel,
   createEmptyDashboardSnapshot,
+  formatGrowthCredits,
   formatSigninStatus,
   formatUpdateMessage,
   getUpdateMessageTone,
+  growthStepTone,
+  growthTriggerLabel,
   isSigninBusy,
   isActionableUpdate,
   normalizeError,
@@ -87,4 +90,28 @@ test("only exposes complete update results as actionable", () => {
   assert.equal(isActionableUpdate({ ...update, latestVersion: "" }), false);
   assert.equal(isActionableUpdate({ ...update, status: "upToDate" }), false);
   assert.equal(isActionableUpdate(null), false);
+});
+
+test("labels growth triggers and step tones", () => {
+  assert.equal(growthTriggerLabel("daily"), "每日自动");
+  assert.equal(growthTriggerLabel("poll"), "定时轮询");
+  assert.equal(growthTriggerLabel("manual"), "手动运行");
+  assert.equal(growthTriggerLabel(undefined), "手动运行");
+
+  assert.equal(growthStepTone("ok"), "ok");
+  assert.equal(growthStepTone("failed"), "danger");
+  assert.equal(growthStepTone("skipped"), "warn");
+  assert.equal(growthStepTone("normal"), "muted");
+});
+
+test("formats growth credits without showing a bare zero", () => {
+  assert.equal(formatGrowthCredits("0"), "—");
+  assert.equal(formatGrowthCredits(""), "—");
+  assert.equal(formatGrowthCredits(null), "—");
+  assert.equal(formatGrowthCredits("100"), "+100");
+  assert.equal(formatGrowthCredits("0.5"), "+0.5");
+});
+
+test("empty snapshot carries the growth schedule field", () => {
+  assert.equal(createEmptyDashboardSnapshot().nextGrowthRunAt, null);
 });

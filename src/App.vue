@@ -109,11 +109,21 @@
           @refresh="store.refreshAccountCredit()"
         />
         <CheckinView
-          v-else
+          v-else-if="store.activeView === 'checkin'"
           :account="store.currentAccount"
           :next-auto-checkin-at="store.snapshot.nextAutoCheckinAt"
           :loading="store.checkinLoading"
           @run="store.runCheckinCurrent"
+        />
+        <GrowthView
+          v-else
+          :account="store.currentAccount"
+          :has-accounts="store.accounts.length > 0"
+          :next-growth-run-at="store.snapshot.nextGrowthRunAt"
+          :automation-enabled="settingsStore.growthAutomationEnabled"
+          :loading="store.growthLoading"
+          @run="store.runGrowthCurrent"
+          @run-all="store.runGrowthAll"
         />
       </template>
     </main>
@@ -133,6 +143,7 @@ import CheckinView from "./components/checkin/CheckinView.vue";
 import AccountSwitcher from "./components/common/AccountSwitcher.vue";
 import UpdateNotice from "./components/common/UpdateNotice.vue";
 import CreditView from "./components/credit/CreditView.vue";
+import GrowthView from "./components/growth/GrowthView.vue";
 import SettingsPage from "./components/pages/SettingsPage.vue";
 import { useDashboardStore } from "./stores/dashboard";
 import { useSettingsStore } from "./stores/settings";
@@ -142,6 +153,7 @@ const settingsStore = useSettingsStore();
 const navigation = [
   { id: "credit", label: "额度概览" },
   { id: "checkin", label: "签到状态" },
+  { id: "growth", label: "成长中心" },
 ];
 
 function focusNavigation(currentId, direction, event) {
@@ -158,6 +170,7 @@ async function initializeUpdateCheck() {
 
 onMounted(() => {
   void store.initialize();
+  void settingsStore.loadAppSettings();
   void initializeUpdateCheck();
 });
 </script>

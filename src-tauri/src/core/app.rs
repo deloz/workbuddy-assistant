@@ -9,8 +9,15 @@ pub(crate) fn run() {
         .setup(|app| {
             let local_data_dir = app.path().app_local_data_dir()?;
             let history_path = local_data_dir.join("checkin-history.json");
+            let growth_history_path = local_data_dir.join("growth-history.json");
+            let settings_path = local_data_dir.join("settings.json");
             let signin_path = local_data_dir.join("workbuddy-signin.json");
-            app.manage(DashboardRuntime::with_paths(history_path, signin_path));
+            app.manage(DashboardRuntime::with_paths(
+                history_path,
+                growth_history_path,
+                settings_path,
+                signin_path,
+            ));
             tray::setup(app)?;
             scheduler::start(app.handle().clone());
             Ok(())
@@ -34,6 +41,10 @@ pub(crate) fn run() {
             app_commands::refresh_account_credit,
             app_commands::run_checkin_all_command,
             app_commands::run_checkin_account,
+            app_commands::run_growth_all_command,
+            app_commands::run_growth_account,
+            app_commands::get_app_settings,
+            app_commands::set_growth_automation_enabled,
             app_commands::reveal_account_identifier,
             app_commands::check_for_updates
         ])
