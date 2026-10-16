@@ -46,7 +46,6 @@ scoop uninstall workbuddy-assistant
 - 业务常态不算故障：旅行名额已用完、兑换档位未解锁、没有抽奖机会、日期无需补登都属于正常状态。
 - 成长中心按个人身份记账：同一账号的用户身份只运行一次，企业身份不参与成长中心。
 - 应用只在运行期间执行调度；完全退出后不会有任何自动任务运行。
-5. 需要完全退出时，使用系统托盘菜单中的“退出”。
 
 ## 隐私
 
@@ -71,6 +70,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
+
+代码质量基线：`src-tauri/Cargo.toml` 的 `[lints]` 表把 `clippy::pedantic` 设为默认告警、禁止 `unsafe`，因此上面的 `cargo clippy -- -D warnings` 会连同 pedantic 一起校验。确有必要放宽的地方，用带 `reason` 的 `#[allow]` 就地说明原因。
 
 依赖漏洞由 `Security` 工作流在推送 `main`、提交 PR 和每周一自动检查：前端运行 `npm audit --audit-level=high`，Rust 运行 `cargo audit`。需要放行的告警记录在 `.cargo/audit.toml` 并写明原因，其余漏洞会让工作流失败。本地可执行 `npm.cmd audit --audit-level=high --registry=https://registry.npmjs.org/` 与 `cargo audit` 自查。
 
