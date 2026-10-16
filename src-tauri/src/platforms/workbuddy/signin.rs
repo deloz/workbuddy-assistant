@@ -515,7 +515,7 @@ fn text(value: Option<&str>) -> Option<String> {
 }
 
 /// 32 位十六进制会话标识。不引入随机数依赖：`RandomState` 的哈希密钥来自操作系统的随机源。
-fn random_hex(length: usize) -> String {
+pub(crate) fn random_hex(length: usize) -> String {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
 

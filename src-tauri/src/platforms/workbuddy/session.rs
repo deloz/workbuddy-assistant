@@ -23,6 +23,27 @@ impl AccountSession {
         self.enterprise_id.is_some()
     }
 
+    /// 成长中心只按个人身份记账：带上企业头的请求会被服务端直接 403。
+    pub fn personal_context(&self) -> Self {
+        Self {
+            uid: self.uid.clone(),
+            access_token: self.access_token.clone(),
+            domain: self.domain.clone(),
+            enterprise_id: None,
+        }
+    }
+
+    /// 只读联调用的构造入口，让测试能在不读取磁盘凭据的情况下复用请求封装。
+    #[cfg(test)]
+    pub(crate) fn for_test(uid: String, access_token: String, domain: Option<String>) -> Self {
+        Self {
+            uid,
+            access_token,
+            domain,
+            enterprise_id: None,
+        }
+    }
+
     pub fn authorize(&self, mut request: RequestBuilder) -> RequestBuilder {
         request = request
             .bearer_auth(&self.access_token)
