@@ -107,8 +107,10 @@ impl DashboardRuntime {
     }
 
     pub(crate) async fn settings_view(&self) -> AppSettingsView {
+        let settings = self.app_settings().await;
         AppSettingsView {
-            growth_automation_enabled: self.app_settings().await.growth_automation_enabled,
+            growth_automation_enabled: settings.growth_automation_enabled,
+            launch_at_startup: launch_at_startup_state(&settings),
         }
     }
 
@@ -122,7 +124,39 @@ impl DashboardRuntime {
             .map_err(|_| "无法保存设置，请检查磁盘权限后重试".to_owned())?;
         Ok(AppSettingsView {
             growth_automation_enabled: enabled,
+            launch_at_startup: launch_at_startup_state(settings.settings()),
         })
+    }
+
+    /// 开关开机启动：先改系统启动项，成功后才落盘意图，
+    /// 避免出现“设置说开着、注册表没写”或反之的错位状态。
+    pub(crate) async fn set_launch_at_startup(
+        &self,
+        enabled: bool,
+    ) -> Result<AppSettingsView, String> {
+        let mut settings = self.settings.lock().await;
+        crate::core::autostart::set_enabled(enabled)?;
+        settings
+            .set_launch_at_startup(enabled)
+            .map_err(|_| "无法保存设置，请检查磁盘权限后重试".to_owned())?;
+        Ok(AppSettingsView {
+            growth_automation_enabled: settings.settings().growth_automation_enabled,
+            launch_at_startup: launch_at_startup_state(settings.settings()),
+        })
+    }
+
+    /// 应用“开机启动默认启用”：只处理从未设置过的用户（新装或老版本升级）。
+    /// 写注册表失败时不落盘意图，下次启动会再试一次。
+    pub(crate) async fn apply_launch_at_startup_default(&self) -> Result<(), String> {
+        let mut settings = self.settings.lock().await;
+        if settings.launch_at_startup_intent().is_some() {
+            return Ok(());
+        }
+        crate::core::autostart::set_enabled(true)?;
+        settings
+            .set_launch_at_startup(true)
+            .map_err(|_| "无法保存设置，请检查磁盘权限后重试".to_owned())?;
+        Ok(())
     }
 
     /// 尚未超时的待完成登录；超时即视为没有。
@@ -500,6 +534,13 @@ fn growth_state_label(snapshot: &GrowthSnapshot) -> String {
 
 fn should_run_automatic(last_run: Option<NaiveDate>, today: NaiveDate) -> bool {
     last_run != Some(today)
+}
+
+/// 设置页展示的开机启动状态：以系统启动项的真实状态为准，
+/// 读不到注册表时回落到用户意图（从未设置过的用户按默认启用）。
+fn launch_at_startup_state(settings: &AppSettings) -> bool {
+    crate::core::autostart::is_enabled()
+        .unwrap_or_else(|_| settings.launch_at_startup.unwrap_or(true))
 }
 
 pub(crate) fn next_local_midnight(now: chrono::DateTime<Local>) -> chrono::DateTime<Local> {

@@ -1,4 +1,4 @@
-//! 应用设置：目前只有成长中心自动化开关；文件损坏时回落到默认值。
+//! 应用设置：成长中心自动化开关与开机启动；文件损坏时回落到默认值。
 
 use std::io;
 use std::path::PathBuf;
@@ -25,12 +25,16 @@ fn default_growth_automation_enabled() -> bool {
 pub struct AppSettings {
     #[serde(default = "default_growth_automation_enabled")]
     pub growth_automation_enabled: bool,
+    /// 开机启动的用户意图；`None` 表示从未在本机应用过（新装或老版本升级），按默认启用处理。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_at_startup: Option<bool>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             growth_automation_enabled: default_growth_automation_enabled(),
+            launch_at_startup: None,
         }
     }
 }
@@ -73,6 +77,17 @@ impl SettingsStore {
         Ok(self.settings.clone())
     }
 
+    /// 用户显式设置过的开机启动意图：`None` 表示还没在本机应用过。
+    pub fn launch_at_startup_intent(&self) -> Option<bool> {
+        self.settings.launch_at_startup
+    }
+
+    pub fn set_launch_at_startup(&mut self, enabled: bool) -> io::Result<AppSettings> {
+        self.settings.launch_at_startup = Some(enabled);
+        self.persist()?;
+        Ok(self.settings.clone())
+    }
+
     fn persist(&self) -> io::Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -111,6 +126,7 @@ mod tests {
         let store = SettingsStore::load(path);
 
         assert!(store.settings().growth_automation_enabled);
+        assert_eq!(store.launch_at_startup_intent(), None);
     }
 
     #[test]
@@ -123,6 +139,7 @@ mod tests {
         let store = SettingsStore::load(path);
 
         assert!(store.settings().growth_automation_enabled);
+        assert_eq!(store.launch_at_startup_intent(), None);
         fs::remove_dir_all(parent).unwrap();
     }
 
@@ -136,6 +153,7 @@ mod tests {
         let store = SettingsStore::load(path);
 
         assert!(store.settings().growth_automation_enabled);
+        assert_eq!(store.launch_at_startup_intent(), None);
         fs::remove_dir_all(parent).unwrap();
     }
 
@@ -150,6 +168,40 @@ mod tests {
         assert!(!updated.growth_automation_enabled);
         let reloaded = SettingsStore::load(path);
         assert!(!reloaded.settings().growth_automation_enabled);
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn settings_written_by_older_versions_leave_launch_intent_unset() {
+        let path = unique_path("settings.json");
+        let parent = path.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&parent).unwrap();
+        fs::write(&path, br#"{"version":1,"growthAutomationEnabled":false}"#).unwrap();
+
+        let store = SettingsStore::load(path);
+
+        assert!(!store.settings().growth_automation_enabled);
+        assert_eq!(store.launch_at_startup_intent(), None);
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[test]
+    fn launch_intent_round_trips_through_json_file() {
+        let path = unique_path("settings.json");
+        let parent = path.parent().unwrap().to_path_buf();
+        let mut store = SettingsStore::load(path.clone());
+
+        store.set_launch_at_startup(false).unwrap();
+        assert_eq!(
+            SettingsStore::load(path.clone()).launch_at_startup_intent(),
+            Some(false)
+        );
+
+        store.set_launch_at_startup(true).unwrap();
+        assert_eq!(
+            SettingsStore::load(path).launch_at_startup_intent(),
+            Some(true)
+        );
         fs::remove_dir_all(parent).unwrap();
     }
 }

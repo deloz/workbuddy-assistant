@@ -1,8 +1,8 @@
-use tauri::{Manager, WindowEvent};
+use tauri::{AppHandle, Manager, WindowEvent};
 
 use super::app_commands;
 use super::dashboard::DashboardRuntime;
-use super::{scheduler, tray};
+use super::{autostart, scheduler, tray};
 
 pub(crate) fn run() {
     tauri::Builder::default()
@@ -19,6 +19,8 @@ pub(crate) fn run() {
                 signin_path,
             ));
             tray::setup(app)?;
+            show_main_window_unless_autostart(app);
+            apply_autostart_default(app.handle());
             scheduler::start(app.handle().clone());
             Ok(())
         })
@@ -45,10 +47,30 @@ pub(crate) fn run() {
             app_commands::run_growth_account,
             app_commands::get_app_settings,
             app_commands::set_growth_automation_enabled,
+            app_commands::set_launch_at_startup,
             app_commands::reveal_account_identifier,
             app_commands::check_for_updates
         ])
         .plugin(tauri_plugin_opener::init())
         .run(tauri::generate_context!())
         .expect("启动 WorkBuddy助手失败");
+}
+
+/// 开机启动时保持窗口隐藏，只常驻托盘；手动启动仍直接显示主窗口。
+fn show_main_window_unless_autostart(app: &tauri::App) {
+    if autostart::launched_by_autostart() {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+    }
+}
+
+/// 开机启动默认启用：从未设置过的用户（新装或老版本升级）启动时补齐启动项。
+fn apply_autostart_default(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let runtime = handle.state::<DashboardRuntime>();
+        let _ = runtime.apply_launch_at_startup_default().await;
+    });
 }

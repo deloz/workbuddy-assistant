@@ -1,6 +1,6 @@
 [package]
 name = "workbuddy-assistant"
-version = "0.0.7"
+version = "0.0.8"
 description = "WorkBuddy multi-account credit and daily check-in assistant"
 edition = "2024"
 rust-version = "1.95"
@@ -31,6 +31,10 @@ serde_json = "1"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tokio = { version = "1", features = ["sync", "time"] }
+
+# 开机启动只在当前用户的 Run 项里写注册表，不改动系统级启动项。
+[target.'cfg(windows)'.dependencies]
+auto-launch = "0.6"
 
 [profile.release]
 lto = "thin"

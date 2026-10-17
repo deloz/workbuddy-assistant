@@ -18,7 +18,8 @@
         "minWidth": 860,
         "minHeight": 560,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": false
       }
     ],
     "security": {
@@ -35,7 +36,9 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "nsis": null
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
     }
   }
 }

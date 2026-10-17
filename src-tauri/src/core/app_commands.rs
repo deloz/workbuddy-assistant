@@ -113,6 +113,14 @@ pub(crate) async fn set_growth_automation_enabled(
 }
 
 #[tauri::command]
+pub(crate) async fn set_launch_at_startup(
+    state: State<'_, DashboardRuntime>,
+    enabled: bool,
+) -> Result<AppSettingsView, String> {
+    state.set_launch_at_startup(enabled).await
+}
+
+#[tauri::command]
 pub(crate) async fn reveal_account_identifier(
     state: State<'_, DashboardRuntime>,
     account_id: String,

@@ -27,6 +27,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const settingsLoaded = ref(false);
   const savingGrowthAutomation = ref(false);
   const settingsError = ref(null);
+  const launchAtStartup = ref(true);
+  const savingLaunchAtStartup = ref(false);
+  const launchAtStartupError = ref(null);
 
   const actionableUpdate = computed(() => isActionableUpdate(updateResult.value));
   const updateNoticeVisible = computed(
@@ -56,6 +59,7 @@ export const useSettingsStore = defineStore("settings", () => {
     try {
       const settings = await invoke("get_app_settings");
       growthAutomationEnabled.value = settings?.growthAutomationEnabled !== false;
+      launchAtStartup.value = settings?.launchAtStartup !== false;
       settingsLoaded.value = true;
       return true;
     } catch {
@@ -83,6 +87,28 @@ export const useSettingsStore = defineStore("settings", () => {
 
   async function toggleGrowthAutomation() {
     return setGrowthAutomation(!growthAutomationEnabled.value);
+  }
+
+  async function setLaunchAtStartup(enabled) {
+    if (savingLaunchAtStartup.value) {
+      return false;
+    }
+    savingLaunchAtStartup.value = true;
+    launchAtStartupError.value = null;
+    try {
+      const settings = await invoke("set_launch_at_startup", { enabled });
+      launchAtStartup.value = settings?.launchAtStartup !== false;
+      return true;
+    } catch (reason) {
+      launchAtStartupError.value = normalizeError(reason);
+      return false;
+    } finally {
+      savingLaunchAtStartup.value = false;
+    }
+  }
+
+  async function toggleLaunchAtStartup() {
+    return setLaunchAtStartup(!launchAtStartup.value);
   }
 
   async function checkForUpdates() {
@@ -150,10 +176,15 @@ export const useSettingsStore = defineStore("settings", () => {
     settingsLoaded,
     savingGrowthAutomation,
     settingsError,
+    launchAtStartup,
+    savingLaunchAtStartup,
+    launchAtStartupError,
     initialize,
     loadAppSettings,
     setGrowthAutomation,
     toggleGrowthAutomation,
+    setLaunchAtStartup,
+    toggleLaunchAtStartup,
     checkForUpdates,
     openExternalLink,
     openUpdateGuide,

@@ -108,6 +108,30 @@
             </p>
           </dd>
         </div>
+        <div class="about-row">
+          <dt>开机启动</dt>
+          <dd>
+            <button
+              class="button button--secondary settings-link"
+              type="button"
+              :disabled="store.savingLaunchAtStartup"
+              :aria-pressed="store.launchAtStartup"
+              @click="store.toggleLaunchAtStartup"
+            >
+              {{ store.launchAtStartup ? "已开启，点击关闭" : "已关闭，点击开启" }}
+            </button>
+            <p class="settings-message settings-message--neutral">
+              开启后，登录 Windows 时会在后台自动启动并常驻托盘，按原计划继续自动签到；关闭后需要手动启动应用。安装版卸载时会清理由此写入的启动项，便携版或 Scoop 用户需要自行移除。
+            </p>
+            <p
+              v-if="launchAtStartupError"
+              class="settings-message settings-message--error"
+              role="status"
+            >
+              {{ launchAtStartupError }}
+            </p>
+          </dd>
+        </div>
       </div>
     </section>
 
@@ -209,6 +233,7 @@ const updateMessageTone = computed(() =>
   }),
 );
 const settingsError = computed(() => store.settingsError);
+const launchAtStartupError = computed(() => store.launchAtStartupError);
 
 onMounted(() => {
   store.initialize();

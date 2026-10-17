@@ -120,6 +120,8 @@ pub struct GrowthBatchSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct AppSettingsView {
     pub growth_automation_enabled: bool,
+    /// 开机启动的当前实际状态：任务管理器里禁用过也算关闭。
+    pub launch_at_startup: bool,
 }
 
 impl AccountCreditState {
