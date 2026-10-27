@@ -4,11 +4,12 @@ mod operations;
 mod runtime;
 mod signin;
 
+pub(crate) use diagnostics::run as run_diagnostics;
 pub(crate) use models::{
     AccountCreditSnapshot, AccountGrowthSnapshot, AppSettingsView, CheckinAccountSnapshot,
-    CheckinBatchSnapshot, DashboardSnapshot, DiagnosticReport, GrowthBatchSnapshot, SigninStartView,
+    CheckinBatchSnapshot, DashboardSnapshot, DiagnosticReport, GrowthBatchSnapshot,
+    SigninStartView,
 };
-pub(crate) use diagnostics::run as run_diagnostics;
 pub(crate) use operations::{
     refresh_account_credit, reload_accounts, reveal_account_identifier, run_checkin_account,
     run_checkin_all, run_growth_account, run_growth_all,

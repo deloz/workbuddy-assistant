@@ -7,8 +7,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::session::AccountSession;
 use super::net;
+use super::session::AccountSession;
 
 const CREDIT_ENDPOINT: &str = "https://copilot.tencent.com/billing/meter/get-user-resource";
 const ENTERPRISE_CREDIT_ENDPOINT: &str =

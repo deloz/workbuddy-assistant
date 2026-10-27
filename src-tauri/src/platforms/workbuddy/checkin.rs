@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::session::AccountSession;
 use super::net;
+use super::session::AccountSession;
 
 const STATUS_ENDPOINT: &str =
     "https://copilot.tencent.com/v2/billing/meter/checkin-activity-status";
@@ -174,13 +174,15 @@ async fn post_empty_json(
     );
 
     // 网络瞬时故障已在 `send_with_retry` 里退避重试，这里只翻译最终错误。
-    let response = net::send_with_retry(request_builder).await.map_err(|error| {
-        if error.is_timeout() {
-            format!("{action}超时，请检查网络后重试")
-        } else {
-            format!("无法连接签到服务以{action}，请检查网络后重试")
-        }
-    })?;
+    let response = net::send_with_retry(request_builder)
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                format!("{action}超时，请检查网络后重试")
+            } else {
+                format!("无法连接签到服务以{action}，请检查网络后重试")
+            }
+        })?;
 
     let status = response.status();
     if status == StatusCode::UNAUTHORIZED {

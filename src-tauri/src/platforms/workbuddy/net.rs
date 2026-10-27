@@ -20,9 +20,7 @@ pub(crate) fn is_transient(error: &reqwest::Error) -> bool {
 ///
 /// 每轮都重新克隆请求，保证请求体可重放；请求体不可重放时只发送一次，
 /// 保持与调用方原本 `send()` 完全一致的语义与错误。
-pub(crate) async fn send_with_retry(
-    builder: RequestBuilder,
-) -> Result<Response, reqwest::Error> {
+pub(crate) async fn send_with_retry(builder: RequestBuilder) -> Result<Response, reqwest::Error> {
     if builder.try_clone().is_none() {
         return builder.send().await;
     }
@@ -49,7 +47,10 @@ mod tests {
 
     #[test]
     fn retry_delays_match_the_growth_backoff() {
-        assert_eq!(RETRY_DELAYS, [Duration::from_secs(3), Duration::from_secs(10)]);
+        assert_eq!(
+            RETRY_DELAYS,
+            [Duration::from_secs(3), Duration::from_secs(10)]
+        );
     }
 
     #[test]
