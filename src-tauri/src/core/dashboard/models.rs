@@ -124,6 +124,25 @@ pub struct AppSettingsView {
     pub launch_at_startup: bool,
 }
 
+/// 诊断报告里的一条检查结果。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticItem {
+    pub label: String,
+    /// `ok` 正常、`warn` 可继续使用但有隐患、`fail` 需要用户处理。
+    pub status: &'static str,
+    pub detail: String,
+}
+
+/// 一次自检的完整结果；只含脱敏标识，不含任何凭据内容。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticReport {
+    pub ran_at: String,
+    pub healthy: bool,
+    pub items: Vec<DiagnosticItem>,
+}
+
 impl AccountCreditState {
     pub(super) fn idle(account_id: &str) -> Self {
         Self {

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::session::AccountSession;
+use super::net;
 
 const CREDIT_ENDPOINT: &str = "https://copilot.tencent.com/billing/meter/get-user-resource";
 const ENTERPRISE_CREDIT_ENDPOINT: &str =
@@ -118,8 +119,7 @@ pub(crate) async fn fetch_credit_usage(
     };
     let request_builder = session.authorize(client.post(CREDIT_ENDPOINT).json(&request));
 
-    let response = request_builder
-        .send()
+    let response = net::send_with_retry(request_builder)
         .await
         .map_err(|_| "无法连接额度服务，请检查网络后重试".to_owned())?;
 
@@ -145,13 +145,12 @@ async fn fetch_enterprise_credit(
     client: &reqwest::Client,
     session: &AccountSession,
 ) -> Result<CreditSnapshot, String> {
-    let response = session
-        .authorize(
-            client
-                .post(ENTERPRISE_CREDIT_ENDPOINT)
-                .json(&serde_json::json!({})),
-        )
-        .send()
+    let request_builder = session.authorize(
+        client
+            .post(ENTERPRISE_CREDIT_ENDPOINT)
+            .json(&serde_json::json!({})),
+    );
+    let response = net::send_with_retry(request_builder)
         .await
         .map_err(|_| "无法连接企业额度服务，请检查网络后重试".to_owned())?;
 

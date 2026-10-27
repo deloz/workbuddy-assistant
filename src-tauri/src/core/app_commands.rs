@@ -2,8 +2,8 @@ use tauri::State;
 
 use super::dashboard::{
     self, AccountCreditSnapshot, AccountGrowthSnapshot, AppSettingsView, CheckinAccountSnapshot,
-    CheckinBatchSnapshot, DashboardRuntime, DashboardSnapshot, GrowthBatchSnapshot,
-    SigninStartView,
+    CheckinBatchSnapshot, DashboardRuntime, DashboardSnapshot, DiagnosticReport,
+    GrowthBatchSnapshot, SigninStartView,
 };
 use super::update::{self, UpdateCheckSnapshot};
 
@@ -102,6 +102,14 @@ pub(crate) async fn get_app_settings(
     state: State<'_, DashboardRuntime>,
 ) -> Result<AppSettingsView, String> {
     Ok(state.settings_view().await)
+}
+
+/// 一键自检：只读检查本机凭据并探一次服务端连通性，不领取、不续期。
+#[tauri::command]
+pub(crate) async fn run_diagnostics(
+    state: State<'_, DashboardRuntime>,
+) -> Result<DiagnosticReport, String> {
+    Ok(dashboard::run_diagnostics(state.inner()).await)
 }
 
 #[tauri::command]

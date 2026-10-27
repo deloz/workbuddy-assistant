@@ -10,15 +10,52 @@
     <section class="settings-section" aria-labelledby="accounts-title">
       <header class="settings-section__heading">
         <h2 id="accounts-title">WorkBuddy 账号</h2>
-        <button
-          class="button button--secondary"
-          type="button"
-          :disabled="dashboard.loading || dashboard.signinBusy"
-          @click="dashboard.beginSignin"
-        >
-          {{ dashboard.signinBusy ? "等待登录完成…" : "添加账号" }}
-        </button>
+        <div class="settings-heading__actions">
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="store.runningDiagnostics"
+            @click="store.runDiagnostics"
+          >
+            <span v-if="store.runningDiagnostics" class="button-spinner" aria-hidden="true"></span>
+            {{ store.runningDiagnostics ? "检查中…" : "运行诊断" }}
+          </button>
+          <button
+            class="button button--secondary"
+            type="button"
+            :disabled="dashboard.loading || dashboard.signinBusy"
+            @click="dashboard.beginSignin"
+          >
+            {{ dashboard.signinBusy ? "等待登录完成…" : "添加账号" }}
+          </button>
+        </div>
       </header>
+
+      <ul
+        v-if="diagnosticItems.length"
+        class="diagnostics"
+        role="status"
+        aria-live="polite"
+        aria-label="诊断结果"
+      >
+        <li
+          v-for="(entry, index) in diagnosticItems"
+          :key="`${index}-${entry.label}`"
+          class="diagnostics__item"
+        >
+          <span class="diagnostics__label">{{ entry.label }}</span>
+          <span class="diagnostics__detail" :class="`diagnostics__detail--${diagnosticTone(entry.status)}`">
+            {{ entry.detail }}
+          </span>
+        </li>
+      </ul>
+      <p
+        v-if="store.diagnosticsError"
+        class="settings-message settings-message--error"
+        role="status"
+      >
+        {{ store.diagnosticsError }}
+      </p>
 
       <p
         v-if="dashboard.signinStatus"
@@ -209,6 +246,7 @@ import { EXTERNAL_LINKS, useSettingsStore } from "../../stores/settings";
 import {
   accountStatusLabel,
   accountTypeLabel,
+  diagnosticTone,
   formatUpdateMessage,
   getUpdateMessageTone,
 } from "../../utils/appState";
@@ -234,6 +272,7 @@ const updateMessageTone = computed(() =>
 );
 const settingsError = computed(() => store.settingsError);
 const launchAtStartupError = computed(() => store.launchAtStartupError);
+const diagnosticItems = computed(() => store.diagnostics?.items ?? []);
 
 onMounted(() => {
   store.initialize();

@@ -30,6 +30,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const launchAtStartup = ref(true);
   const savingLaunchAtStartup = ref(false);
   const launchAtStartupError = ref(null);
+  const diagnostics = ref(null);
+  const runningDiagnostics = ref(false);
+  const diagnosticsError = ref(null);
 
   const actionableUpdate = computed(() => isActionableUpdate(updateResult.value));
   const updateNoticeVisible = computed(
@@ -131,6 +134,24 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function runDiagnostics() {
+    if (runningDiagnostics.value) {
+      return false;
+    }
+    runningDiagnostics.value = true;
+    diagnosticsError.value = null;
+    diagnostics.value = null;
+    try {
+      diagnostics.value = await invoke("run_diagnostics");
+      return true;
+    } catch (reason) {
+      diagnosticsError.value = normalizeError(reason);
+      return false;
+    } finally {
+      runningDiagnostics.value = false;
+    }
+  }
+
   async function openExternalLink(url) {
     linkError.value = null;
     if (!allowedLinks.has(url)) {
@@ -179,6 +200,9 @@ export const useSettingsStore = defineStore("settings", () => {
     launchAtStartup,
     savingLaunchAtStartup,
     launchAtStartupError,
+    diagnostics,
+    runningDiagnostics,
+    diagnosticsError,
     initialize,
     loadAppSettings,
     setGrowthAutomation,
@@ -186,6 +210,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setLaunchAtStartup,
     toggleLaunchAtStartup,
     checkForUpdates,
+    runDiagnostics,
     openExternalLink,
     openUpdateGuide,
     dismissUpdate,

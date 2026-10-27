@@ -5,6 +5,7 @@ import {
   accountStatusLabel,
   accountTypeLabel,
   createEmptyDashboardSnapshot,
+  diagnosticTone,
   formatGrowthCredits,
   formatSigninStatus,
   formatUpdateMessage,
@@ -102,6 +103,13 @@ test("labels growth triggers and step tones", () => {
   assert.equal(growthStepTone("failed"), "danger");
   assert.equal(growthStepTone("skipped"), "warn");
   assert.equal(growthStepTone("normal"), "muted");
+});
+
+test("maps diagnostic tones safely", () => {
+  assert.equal(diagnosticTone("ok"), "ok");
+  assert.equal(diagnosticTone("fail"), "fail");
+  assert.equal(diagnosticTone("warn"), "warn");
+  assert.equal(diagnosticTone("unexpected"), "warn");
 });
 
 test("formats growth credits without showing a bare zero", () => {

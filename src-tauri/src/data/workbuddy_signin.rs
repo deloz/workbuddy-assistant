@@ -1,10 +1,10 @@
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::data::file_store::{
-    JsonFileSpec, VersionedDocument, load_json_or_default, write_json_atomic,
+    JsonFileSpec, VersionedDocument, load_json_checked, load_json_or_default, write_json_atomic,
 };
 
 const SIGNIN_FILE: JsonFileSpec = JsonFileSpec {
@@ -82,6 +82,10 @@ impl SigninStore {
         }
     }
 
+    /// 只读检查凭据文件，保留失败原因；诊断用它区分「尚未登录」与「文件损坏」。
+    pub(crate) fn inspect(path: &Path) -> io::Result<Vec<StoredSignin>> {
+        load_json_checked::<SigninDocument>(path, SIGNIN_FILE).map(|document| document.signins)
+    }
     pub fn signins(&self) -> &[StoredSignin] {
         &self.signins
     }

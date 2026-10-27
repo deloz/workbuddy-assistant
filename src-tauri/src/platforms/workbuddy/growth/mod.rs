@@ -20,14 +20,13 @@ use serde_json::Value;
 use tokio::time::{Instant, sleep};
 
 use super::session::{API_BASE_URL, AccountSession};
+use super::net::RETRY_DELAYS;
 use super::signin::random_hex;
 
 /// 成长中心接口前缀。
 const GROWTH_PATH: &str = "/v2/activity/growth";
 /// 单账号一轮的总时间预算：网络异常时避免一次自动运行被拖穿。
 const RUN_BUDGET: Duration = Duration::from_mins(4);
-/// 只读请求在超时或 5xx 之后的退避间隔；写操作一律不重试。
-const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(3), Duration::from_secs(10)];
 /// 接单接口的批量上限。
 const TASK_BATCH_SIZE: usize = 20;
 

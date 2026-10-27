@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::session::AccountSession;
+use super::net;
 
 const STATUS_ENDPOINT: &str =
     "https://copilot.tencent.com/v2/billing/meter/checkin-activity-status";
@@ -172,7 +173,8 @@ async fn post_empty_json(
             .json(&serde_json::json!({})),
     );
 
-    let response = request_builder.send().await.map_err(|error| {
+    // 网络瞬时故障已在 `send_with_retry` 里退避重试，这里只翻译最终错误。
+    let response = net::send_with_retry(request_builder).await.map_err(|error| {
         if error.is_timeout() {
             format!("{action}超时，请检查网络后重试")
         } else {

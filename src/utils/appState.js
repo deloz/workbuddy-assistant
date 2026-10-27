@@ -83,6 +83,18 @@ export function growthStepTone(status) {
   }
 }
 
+// 诊断项状态映射到样式后缀；未知状态按提醒处理，避免误显示为正常。
+export function diagnosticTone(status) {
+  switch (status) {
+    case "ok":
+      return "ok";
+    case "fail":
+      return "fail";
+    default:
+      return "warn";
+  }
+}
+
 export function formatGrowthCredits(value) {
   const text = String(value ?? "").trim();
   if (!text || Number(text) === 0) {

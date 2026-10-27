@@ -49,7 +49,8 @@ pub(crate) fn run() {
             app_commands::set_growth_automation_enabled,
             app_commands::set_launch_at_startup,
             app_commands::reveal_account_identifier,
-            app_commands::check_for_updates
+            app_commands::check_for_updates,
+            app_commands::run_diagnostics
         ])
         .plugin(tauri_plugin_opener::init())
         .run(tauri::generate_context!())

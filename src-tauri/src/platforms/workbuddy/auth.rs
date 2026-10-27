@@ -226,13 +226,14 @@ fn apply_tokens(signin: &mut StoredSignin, tokens: &SigninTokens) {
     }
 }
 
-fn needs_refresh(signin: &StoredSignin) -> bool {
+pub(crate) fn needs_refresh(signin: &StoredSignin) -> bool {
     signin
         .expires_at_ms
         .is_some_and(|expires_at| unix_now_ms() >= expires_at.saturating_sub(REFRESH_MARGIN_MS))
 }
 
-fn credential_usable(signin: &StoredSignin) -> bool {
+/// 凭据本身是否可用（有 access token 且未过期）；诊断与续期共用这套判定。
+pub(crate) fn credential_usable(signin: &StoredSignin) -> bool {
     !signin.access_token.trim().is_empty()
         && signin
             .expires_at_ms

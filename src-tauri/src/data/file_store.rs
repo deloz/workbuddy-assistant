@@ -85,6 +85,17 @@ where
         .unwrap_or_default()
 }
 
+/// 与 [`load_json_or_default`] 同样的回退顺序，但保留失败原因，供诊断如实报告。
+pub(crate) fn load_json_checked<T>(path: &Path, spec: JsonFileSpec) -> io::Result<T>
+where
+    T: DeserializeOwned + VersionedDocument,
+{
+    read_json_document(path, spec).or_else(|error| match error.kind() {
+        io::ErrorKind::NotFound => read_json_document(&temporary_path(path), spec),
+        _ => Err(error),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
